@@ -6,10 +6,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <title>Caffeine OD</title>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500;600&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;1,6..96,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500;600&family=EB+Garamond:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
-:root{--garamond:"Bodoni Moda","Bodoni MT","Didot",Georgia,serif}
+:root{--garamond:"Apple Garamond","Garamond","EB Garamond",Georgia,serif}
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;width:100%;overflow:hidden;background:#F5EFE0}
 .app{width:100%;height:100vh;height:100dvh;font-family:'DM Sans',sans-serif;background:#F5EFE0;overflow:hidden;position:relative;display:flex;flex-direction:column}
@@ -20,12 +20,6 @@ html,body{height:100%;width:100%;overflow:hidden;background:#F5EFE0}
 .screen{display:none;flex-direction:column;height:100%;background:#F5EFE0;animation:fadeUp .4s ease forwards;overflow:hidden}
 .screen.active{display:flex}
 @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-.land-anim{opacity:0}
-.land-anim.play{animation:fadeUp .5s ease forwards}
-.land-anim.play.d1{animation-delay:.05s}
-.land-anim.play.d2{animation-delay:.12s}
-.land-anim.play.d3{animation-delay:.22s}
-.land-anim.play.d4{animation-delay:.32s}
 .fd{font-family:'Playfair Display',Georgia,serif}
 input{width:100%;background:rgba(245,239,224,0.8);border:1.5px solid #EDE3CC;border-radius:16px;padding:14px 18px;font-family:'DM Sans',sans-serif;font-size:15px;color:#2C1810;transition:all .2s;outline:none}
 input:focus{border-color:#C17D3C;background:rgba(255,255,255,0.85);box-shadow:0 0 0 3px rgba(193,125,60,.12)}
@@ -80,18 +74,18 @@ input.err{border-color:#e74c3c}
 
 <!-- ══════════ SCREEN 1: LANDING ══════════ -->
 <div class="screen active" id="s-landing" style="overflow-y:auto;padding:40px 24px 36px;gap:24px">
-  <div class="land-anim d1" style="text-align:center">
+  <div style="text-align:center;opacity:0;animation:fadeUp .5s .05s forwards">
     <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 3.0</p>
   </div>
 
-  <div class="land-anim d2" style="display:flex;flex-direction:column;align-items:center;gap:16px">
+  <div style="display:flex;flex-direction:column;align-items:center;gap:16px;opacity:0;animation:fadeUp .5s .1s forwards">
     <div style="position:relative;width:80px;height:80px;display:flex;align-items:center;justify-content:center">
       <div style="position:absolute;inset:0;border-radius:50%;border:2px solid rgba(193,125,60,.25)"></div>
       <div style="position:absolute;inset:8px;border-radius:50%;border:1px solid rgba(193,125,60,.15)"></div>
       <span style="font-size:36px">☕</span>
     </div>
     <div style="text-align:center">
-      <h1 style="font-family:var(--garamond);font-size:62px;font-weight:400;color:#2C1810;line-height:1;letter-spacing:.02em;display:flex;align-items:baseline;gap:0;position:relative">Caffeine<span style="display:inline-flex;align-items:flex-end;margin:0 -6px;position:relative;bottom:-11px;z-index:2"><svg width="30" height="34" viewBox="0 0 26 30" fill="none" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(20deg);filter:drop-shadow(0 1px 2px rgba(44,24,16,.18))"><ellipse cx="13" cy="15" rx="9" ry="13" fill="#C17D3C"/><path d="M13 3 Q16 10 13 15 Q10 20 13 27" stroke="#7C4A2C" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg></span>OD</h1>
+      <h1 style="font-family:var(--garamond);font-size:64px;font-weight:400;color:#2C1810;line-height:1;letter-spacing:.02em;display:flex;align-items:baseline;gap:0;position:relative">Caffeine<span style="display:inline-flex;align-items:flex-end;margin:0 -5px;position:relative;bottom:-10px;z-index:2"><svg width="28" height="32" viewBox="0 0 26 30" fill="none" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(-15deg);filter:drop-shadow(0 1px 2px rgba(44,24,16,.18))"><ellipse cx="13" cy="15" rx="9" ry="13" fill="#C17D3C"/><path d="M13 3 Q16 10 13 15 Q10 20 13 27" stroke="#7C4A2C" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg></span>OD</h1>
       <p class="fd" style="font-style:italic;color:#6B5E52;font-size:13px;margin-top:4px;letter-spacing:.05em">by Siddharth Mohanty</p>
     </div>
     <div style="display:flex;align-items:center;gap:12px;margin-top:4px">
@@ -101,7 +95,7 @@ input.err{border-color:#e74c3c}
     </div>
   </div>
 
-  <div class="land-anim d3">
+  <div style="opacity:0;animation:fadeUp .5s .18s forwards">
     <div style="background:rgba(255,255,255,.65);border:1px solid #EDE3CC;border-radius:24px;padding:28px 24px">
       <p class="fd" style="font-size:20px;font-weight:600;color:#2C1810;margin-bottom:4px">Let's get started</p>
       <p style="font-size:13px;color:#6B5E52;margin-bottom:22px">Enter your name and phone to order.</p>
@@ -124,7 +118,7 @@ input.err{border-color:#e74c3c}
     </div>
   </div>
 
-  <div class="land-anim d4" style="text-align:center">
+  <div style="text-align:center;opacity:0;animation:fadeUp .5s .28s forwards">
     <p class="fd" style="font-style:italic;color:rgba(107,94,82,.4);font-size:13px">"Good coffee, good vibes."</p>
   </div>
 </div>
@@ -139,7 +133,7 @@ input.err{border-color:#e74c3c}
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
       <div style="text-align:right">
-        <p style="font-family:var(--garamond);font-size:19px;font-weight:400;color:#C17D3C;line-height:1.2;display:flex;align-items:baseline;gap:0">Caffeine<span style="display:inline-flex;align-items:flex-end;margin:0 -2px;position:relative;bottom:-4px;z-index:2"><svg width="11" height="14" viewBox="0 0 26 30" fill="none" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(20deg)"><ellipse cx="13" cy="15" rx="9" ry="13" fill="#C17D3C"/><path d="M13 3 Q16 10 13 15 Q10 20 13 27" stroke="#7C4A2C" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg></span><span style="color:#2C1810">OD</span></p>
+        <p style="font-family:var(--garamond);font-size:19px;font-weight:400;color:#C17D3C;line-height:1.2;display:flex;align-items:baseline;gap:0">Caffeine<span style="display:inline-flex;align-items:flex-end;margin:0 -2px;position:relative;bottom:-4px;z-index:2"><svg width="11" height="14" viewBox="0 0 26 30" fill="none" xmlns="http://www.w3.org/2000/svg" style="transform:rotate(-15deg)"><ellipse cx="13" cy="15" rx="9" ry="13" fill="#C17D3C"/><path d="M13 3 Q16 10 13 15 Q10 20 13 27" stroke="#7C4A2C" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg></span><span style="color:#2C1810">OD</span></p>
       </div>
       <button onclick="confirmReset()" style="background:none;border:1px solid rgba(44,24,16,.15);cursor:pointer;color:#6B5E52;font-family:'DM Sans',sans-serif;font-size:10px;padding:3px 8px;border-radius:8px;letter-spacing:.03em;transition:all .15s" onmouseover="this.style.background='rgba(44,24,16,.06)'" onmouseout="this.style.background='none'">Sign out</button>
     </div>
@@ -407,11 +401,6 @@ let state = {
 function saveDB(){ localStorage.setItem('caff_od_db', JSON.stringify(state.db)); }
 function saveCounter(){ localStorage.setItem('caff_od_counter', String(state.orderCounter)); }
 
-// Trigger landing animations on first load
-document.addEventListener('DOMContentLoaded', ()=>{
-  document.querySelectorAll('#s-landing .land-anim').forEach(a=>a.classList.add('play'));
-});
-
 function clearAllData(){
   closeModal('modal-cleardata');
   localStorage.removeItem('caff_od_db');
@@ -444,14 +433,10 @@ function showToast(msg, dur=2800){
 function goTo(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   const el=document.getElementById(id);
+  // Force reflow so CSS animations retrigger every time
   void el.offsetWidth;
   el.classList.add('active');
   el.scrollTop=0;
-  // Replay landing animations every time we land on that screen
-  if(id==='s-landing'){
-    const anims=el.querySelectorAll('.land-anim');
-    anims.forEach(a=>{ a.classList.remove('play'); void a.offsetWidth; a.classList.add('play'); });
-  }
 }
 function openModal(id){ document.getElementById(id).style.display='flex'; }
 function closeModal(id){ document.getElementById(id).style.display='none'; }

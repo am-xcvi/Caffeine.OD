@@ -44,19 +44,101 @@
       flex-direction: column
     }
 
-    @media(min-width:500px) {
-      body {
-        background: #e8e0d0
+    /* ── Desktop only: centered card ── */
+    @media(min-width:1280px) {
+      body { background: #e8e0d0 }
+      .app {
+        max-width: 540px;
+        margin: 0 auto;
+        border-radius: 28px;
+        height: min(100dvh, 940px);
+        margin-top: max(0px, calc(50vh - 470px));
+        box-shadow: 0 12px 56px rgba(44,24,16,0.22)
+      }
+    }
+
+    /* ── Tablet: full screen, scaled layout ── */
+    @media(min-width:768px) and (max-width:1279px) {
+
+      html { font-size: 18px }
+
+      #s-landing { padding: 56px 48px 48px !important; gap: 32px !important }
+      #s-landing h1 { font-size: 80px !important }
+
+      /* Form card more padding */
+      #s-landing > .land-anim.d3 > div {
+        padding: 36px 32px !important;
+        border-radius: 28px !important
       }
 
-      .app {
-        max-width: 420px;
-        margin: 0 auto;
-        border-radius: 24px;
-        height: min(100dvh, 900px);
-        margin-top: max(0px, calc(50vh - 450px));
-        box-shadow: 0 8px 40px rgba(44, 24, 16, 0.18)
+      input {
+        padding: 17px 22px !important;
+        font-size: 16px !important;
+        border-radius: 18px !important
       }
+      #inp-phone { padding-left: 58px !important }
+
+      .btn-dark  { padding: 18px !important; font-size: 16px !important; border-radius: 18px !important }
+      .btn-outline { padding: 16px !important; font-size: 15px !important; border-radius: 18px !important }
+      .btn-amber { padding: 17px !important; font-size: 15px !important }
+
+      /* Menu nav bar */
+      #s-menu > div:first-child { padding: 16px 28px !important }
+      /* Menu scroll area */
+      #s-menu > div:nth-child(2) { padding: 24px 28px 140px !important }
+
+      /* ★ 2-column menu card grid ★ */
+      #menu-cards {
+        display: grid !important;
+        grid-template-columns: 1fr 1fr !important;
+        flex-direction: unset !important;
+        gap: 18px !important
+      }
+
+      /* Cart bar */
+      #cart-bar { left: 28px !important; right: 28px !important; bottom: 24px !important }
+      #cart-bar button { padding: 17px 24px !important; border-radius: 18px !important; font-size: 15px !important }
+
+      /* Order screen */
+      #s-order > div:nth-child(3) { padding: 20px 32px 130px !important }
+      #s-order > div:nth-child(2) { padding: 14px 32px 0 !important }
+      #s-order > div:last-child   { padding: 16px 32px 32px !important }
+      #order-items-list { padding: 0 22px !important }
+
+      /* Payment screen */
+      #s-payment > div:first-child { padding: 32px 32px 20px !important }
+      #s-payment > div:nth-child(2) { padding: 0 32px 40px !important; gap: 18px !important }
+      #pay-amount { font-size: clamp(40px,8vw,72px) !important }
+
+      /* Admin header */
+      #s-admin > div:first-child { padding: 32px 32px 24px !important }
+      #admin-date { font-size: 14px !important }
+      #adm-stat-orders, #adm-stat-earnings, #adm-stat-custs { font-size: 32px !important }
+
+      /* Admin tabs */
+      #s-admin > div:nth-child(2) { padding: 16px 24px 0 !important }
+      .tab-btn { font-size: 14px !important; padding: 12px 8px !important }
+      #s-admin > div:last-child { padding: 20px 24px 40px !important }
+
+      /* ★ 2-column order cards in admin ★ */
+      #orders-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        align-items: start
+      }
+      #orders-list .order-card { margin-bottom: 0 !important }
+
+      /* Larger interactive targets */
+      .qty-btn  { width: 46px !important; height: 46px !important; font-size: 24px !important }
+      .reset-btn { width: 40px !important; height: 40px !important; font-size: 20px !important }
+      .chk-btn  { width: 36px !important; height: 36px !important }
+
+      /* Modal */
+      .modal-sheet { padding: 36px 36px 48px !important; border-radius: 32px 32px 0 0 !important }
+
+      /* Toast */
+      .toast { font-size: 15px !important; padding: 13px 24px !important }
     }
 
     .screen {
@@ -1243,14 +1325,23 @@
       await setDoc(doc(db, 'customers', data.phoneNumber), data, { merge: true });
     }
     async function getNextOrderId() {
-      const ref = doc(db, 'meta', 'counter');
-      let num;
-      await runTransaction(db, async t => {
-        const snap = await t.get(ref);
-        num = (snap.exists() ? snap.data().count : 0) + 1;
-        t.set(ref, { count: num });
-      });
-      return 'ORD-' + String(num).padStart(3, '0');
+      // Try Firestore counter first; fall back to localStorage if rules block it
+      try {
+        const ref = doc(db, 'meta', 'counter');
+        let num;
+        await runTransaction(db, async t => {
+          const snap = await t.get(ref);
+          num = (snap.exists() ? snap.data().count : 0) + 1;
+          t.set(ref, { count: num });
+        });
+        localStorage.setItem('caff_order_counter', num);
+        return 'ORD-' + String(num).padStart(3, '0');
+      } catch (_) {
+        const key = 'caff_order_counter';
+        const num = (parseInt(localStorage.getItem(key) || '0') + 1);
+        localStorage.setItem(key, num);
+        return 'ORD-' + String(num).padStart(3, '0');
+      }
     }
     async function saveOrder(order, customerPhone, customerName) {
       await setDoc(doc(db, 'orders', order.orderId), { ...order, customerPhone, customerName });
@@ -1755,6 +1846,7 @@
         showToast('Order placed! ☕');
 
         renderPayment();
+        setTimeout(() => sendWhatsAppOrder(order, state.user), 500);
         setTimeout(() => goTo('s-payment'), 400);
 
       } catch (e) {
@@ -1832,6 +1924,11 @@
 
     // ── WHATSAPP ──────────────────────────────────────
     function waOpen(msg) { window.open('https://wa.me/' + WHATSAPP_NUMBER + '?text=' + encodeURIComponent(msg), '_blank'); }
+    function sendWhatsAppOrder(order, user) {
+      const d = new Date(order.timestamp);
+      const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      waOpen('🔔 *New Order — Caffeine.OD*\n\n📋 ' + order.orderId.replace('ORD-','#') + ' · ' + timeStr + '\n👤 *' + user.name + '*\n📞 +91 ' + user.phoneNumber + '\n\n' + order.items.map(it => '  • ' + it.name + ' ×' + it.qty + ' — ₹' + (it.price * it.qty)).join('\n') + '\n\n💰 *Total: ₹' + order.total + '*\n\n_Collect payment via UPI ☕_');
+    }
     function sendWhatsAppReport() {
       if (!cachedOrders.length) { showToast('No orders yet.'); return; }
       const earnings = cachedOrders.reduce((s, o) => s + o.total, 0);

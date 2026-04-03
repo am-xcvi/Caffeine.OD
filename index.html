@@ -113,7 +113,7 @@ input.err{border-color:#e74c3c}
 <!-- ══════════ SCREEN 1: LANDING ══════════ -->
 <div class="screen active" id="s-landing" style="padding:40px 24px 36px;gap:24px">
   <div class="land-anim d1" style="text-align:center">
-    <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 3.6</p>
+    <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 3.7</p>
   </div>
 
   <div class="land-anim d2" style="display:flex;flex-direction:column;align-items:center;gap:16px">
@@ -751,110 +751,181 @@ function statusLabel(status) {
   return map[status] || map['placed'];
 }
 
-// ── 3-QUEUE RENDER ────────────────────────────────
-// preparingOrder tracks the order in which Sid pressed PREPARING (array of orderIds)
-let preparingOrder = [];
+// ── 3-QUEUE RENDER (item-level granularity) ───────
+//
+// Data model:
+//   order.itemStatuses  = { "Spring Sunsets": "placed"|"preparing"|"ready" }
+//   order.itemPrepSeq   = { "Spring Sunsets": <epoch ms when PREPARING pressed> }
+//   order.itemCollected = { "Spring Sunsets": true }  (Ready queue checkoff)
+//
+// Each queue row = one item type within one order.
+// A "drink row" is uniquely identified by (orderId, itemName).
+//
+// The top-level order.status is kept in sync:
+//   - 'placed'    → at least one item still 'placed'
+//   - 'preparing' → all items at least 'preparing', at least one not 'ready'
+//   - 'ready'     → all items 'ready'
 
-function renderOrdersTab() {
-  const newOrders      = cachedOrders.filter(o => !o.status || o.status === 'placed')
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-  const prepOrders     = cachedOrders.filter(o => o.status === 'preparing')
-    .sort((a, b) => {
-      const ia = preparingOrder.indexOf(a.orderId);
-      const ib = preparingOrder.indexOf(b.orderId);
-      if (ia === -1 && ib === -1) return new Date(a.timestamp) - new Date(b.timestamp);
-      if (ia === -1) return 1;
-      if (ib === -1) return -1;
-      return ia - ib;
-    });
-  const readyOrders    = cachedOrders.filter(o => o.status === 'ready' || o.status === 'paid' || o.status === 'done')
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-  // Update counts
-  document.getElementById('q-new-count').textContent   = newOrders.length;
-  document.getElementById('q-prep-count').textContent  = prepOrders.length;
-  document.getElementById('q-ready-count').textContent = readyOrders.length;
-
-  renderQueue('q-new-list',   'q-new-empty',   newOrders,   'new');
-  renderQueue('q-prep-list',  'q-prep-empty',  prepOrders,  'prep');
-  renderQueue('q-ready-list', 'q-ready-empty', readyOrders, 'ready');
+function getItemStatus(order, itemName) {
+  return (order.itemStatuses && order.itemStatuses[itemName]) || 'placed';
 }
 
-function renderQueue(listId, emptyId, orders, type) {
+// Explode all orders into individual drink rows, flattened across all orders
+function buildDrinkRows() {
+  const rows = [];
+  cachedOrders.forEach(order => {
+    order.items.forEach(it => {
+      const status    = getItemStatus(order, it.name);
+      const prepSeq   = (order.itemPrepSeq   && order.itemPrepSeq[it.name])   || 0;
+      const collected = (order.itemCollected && order.itemCollected[it.name]) || false;
+      rows.push({
+        orderId:      order.orderId,
+        customerName: order.customerName,
+        itemName:     it.name,
+        qty:          it.qty,
+        timestamp:    order.timestamp,
+        status,
+        prepSeq,
+        collected,
+      });
+    });
+  });
+  return rows;
+}
+
+function renderOrdersTab() {
+  const allRows = buildDrinkRows();
+
+  const newRows  = allRows.filter(r => r.status === 'placed')
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  const prepRows = allRows.filter(r => r.status === 'preparing')
+    .sort((a, b) => (a.prepSeq || 0) - (b.prepSeq || 0) || new Date(a.timestamp) - new Date(b.timestamp));
+
+  const readyRows = allRows.filter(r => r.status === 'ready')
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+  document.getElementById('q-new-count').textContent   = newRows.length;
+  document.getElementById('q-prep-count').textContent  = prepRows.length;
+  document.getElementById('q-ready-count').textContent = readyRows.length;
+
+  renderItemQueue('q-new-list',   'q-new-empty',   newRows,   'new');
+  renderItemQueue('q-prep-list',  'q-prep-empty',  prepRows,  'prep');
+  renderItemQueue('q-ready-list', 'q-ready-empty', readyRows, 'ready');
+}
+
+function menuEmojiFor(itemName) {
+  const m = MENU.find(x => x.name === itemName);
+  return m ? m.emoji : '☕';
+}
+
+function renderItemQueue(listId, emptyId, rows, type) {
   const list  = document.getElementById(listId);
   const empty = document.getElementById(emptyId);
-  // Remove existing cards (preserve empty placeholder)
   [...list.querySelectorAll('.q-card')].forEach(el => el.remove());
 
-  if (!orders.length) { empty.style.display = 'block'; return; }
+  if (!rows.length) { empty.style.display = 'block'; return; }
   empty.style.display = 'none';
 
-  orders.forEach(order => {
-    const d       = new Date(order.timestamp);
+  rows.forEach(row => {
+    const d       = new Date(row.timestamp);
     const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    const shortId = order.orderId.replace('ORD-', '#');
-    const isDone  = order.collectedByCustomer === true;
+    const shortId = row.orderId.replace('ORD-', '#');
+    const emoji   = menuEmojiFor(row.itemName);
+    const safeId  = row.orderId.replace(/[^a-zA-Z0-9\-]/g, '');
+    const safeItem = row.itemName.replace(/'/g, "\\'");
 
     const card = document.createElement('div');
     card.className = 'q-card';
 
     if (type === 'new') {
-      card.style.cssText = 'background:rgba(255,255,255,.8);border:1px solid rgba(55,138,221,.2);border-radius:14px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
+      card.style.cssText = 'background:rgba(255,255,255,.8);border:1px solid rgba(55,138,221,.2);border-radius:14px;padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
       card.innerHTML = `
+        <span style="font-size:26px;flex-shrink:0">${emoji}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-            <span style="font-size:12px;font-weight:700;color:#185FA5;background:rgba(55,138,221,.1);padding:2px 8px;border-radius:8px">${shortId}</span>
-            <span style="font-size:11px;color:#6B5E52">${timeStr}</span>
+          <p style="font-size:14px;font-weight:600;color:#2C1810;margin-bottom:2px">${row.itemName}${row.qty > 1 ? ' <span style="font-size:12px;color:#C17D3C;font-weight:700">×' + row.qty + '</span>' : ''}</p>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:700;color:#185FA5;background:rgba(55,138,221,.1);padding:1px 7px;border-radius:7px">${shortId}</span>
+            <span style="font-size:11px;color:#6B5E52">${row.customerName}</span>
+            <span style="font-size:10px;color:#9E8E82">${timeStr}</span>
           </div>
-          <p style="font-size:14px;font-weight:600;color:#2C1810;margin-bottom:1px">${order.customerName}</p>
-          <p style="font-size:12px;color:#6B5E52">${order.items.map(it => `${it.name}${it.qty > 1 ? ' ×' + it.qty : ''}`).join(', ')}</p>
         </div>
-        <button onclick="window._moveToPrep('${order.orderId}')" style="background:#185FA5;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em;transition:all .15s" onmouseover="this.style.background='#1045a0'" onmouseout="this.style.background='#185FA5'">PREPARING →</button>`;
+        <button onclick="window._itemToPrep('${row.orderId}','${safeItem}')" style="background:#185FA5;color:#fff;border:none;border-radius:10px;padding:8px 11px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em;transition:background .15s" onmouseover="this.style.background='#1045a0'" onmouseout="this.style.background='#185FA5'">PREPARING →</button>`;
+
     } else if (type === 'prep') {
-      card.style.cssText = 'background:rgba(255,255,255,.8);border:1px solid rgba(239,159,39,.3);border-radius:14px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
+      card.style.cssText = 'background:rgba(255,255,255,.8);border:1px solid rgba(239,159,39,.3);border-radius:14px;padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
       card.innerHTML = `
+        <span style="font-size:26px;flex-shrink:0">${emoji}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
-            <span style="font-size:12px;font-weight:700;color:#854F0B;background:rgba(239,159,39,.15);padding:2px 8px;border-radius:8px">${shortId}</span>
-            <span style="font-size:11px;color:#6B5E52">${timeStr}</span>
+          <p style="font-size:14px;font-weight:600;color:#2C1810;margin-bottom:2px">${row.itemName}${row.qty > 1 ? ' <span style="font-size:12px;color:#C17D3C;font-weight:700">×' + row.qty + '</span>' : ''}</p>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:700;color:#854F0B;background:rgba(239,159,39,.15);padding:1px 7px;border-radius:7px">${shortId}</span>
+            <span style="font-size:11px;color:#6B5E52">${row.customerName}</span>
+            <span style="font-size:10px;color:#9E8E82">${timeStr}</span>
           </div>
-          <p style="font-size:14px;font-weight:600;color:#2C1810;margin-bottom:1px">${order.customerName}</p>
-          <p style="font-size:12px;color:#6B5E52">${order.items.map(it => `${it.name}${it.qty > 1 ? ' ×' + it.qty : ''}`).join(', ')}</p>
         </div>
-        <button onclick="window._moveToReady('${order.orderId}')" style="background:#C17D3C;color:#fff;border:none;border-radius:10px;padding:8px 12px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em;transition:all .15s" onmouseover="this.style.background='#a86930'" onmouseout="this.style.background='#C17D3C'">READY →</button>`;
+        <button onclick="window._itemToReady('${row.orderId}','${safeItem}')" style="background:#C17D3C;color:#fff;border:none;border-radius:10px;padding:8px 11px;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em;transition:background .15s" onmouseover="this.style.background='#a86930'" onmouseout="this.style.background='#C17D3C'">READY →</button>`;
+
     } else {
-      // Ready queue — checklist style
-      card.style.cssText = `background:${isDone ? 'rgba(76,175,80,.06)' : 'rgba(255,255,255,.8)'};border:1px solid ${isDone ? 'rgba(76,175,80,.3)' : 'rgba(76,175,80,.2)'};border-radius:14px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;transition:all .2s`;
+      // Ready queue — per-item checklist
+      const isDone = row.collected;
+      card.style.cssText = `background:${isDone ? 'rgba(76,175,80,.06)' : 'rgba(255,255,255,.8)'};border:1px solid ${isDone ? 'rgba(76,175,80,.35)' : 'rgba(76,175,80,.2)'};border-radius:14px;padding:11px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;transition:all .2s`;
       card.innerHTML = `
-        <button onclick="window._toggleCollected('${order.orderId}',${isDone})" style="width:28px;height:28px;border-radius:50%;border:2px solid ${isDone ? '#4caf50' : '#4caf50'};background:${isDone ? '#4caf50' : 'none'};cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s">
+        <button onclick="window._itemToggleCollected('${row.orderId}','${safeItem}',${isDone})" style="width:28px;height:28px;border-radius:50%;border:2px solid #4caf50;background:${isDone ? '#4caf50' : 'none'};cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s">
           ${isDone ? '<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><polyline points="2,7 5.5,10.5 12,3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
         </button>
+        <span style="font-size:24px;flex-shrink:0">${emoji}</span>
         <div style="flex:1;min-width:0">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
-            <span style="font-size:12px;font-weight:700;color:#2e7d32;background:rgba(76,175,80,.1);padding:2px 8px;border-radius:8px">${shortId}</span>
-            <span style="font-size:11px;color:#6B5E52">${timeStr}</span>
+          <p style="font-size:14px;font-weight:600;${isDone ? 'text-decoration:line-through;color:#9E8E82' : 'color:#2C1810'};margin-bottom:2px">${row.itemName}${row.qty > 1 ? ' ×' + row.qty : ''}</p>
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:11px;font-weight:700;color:#2e7d32;background:rgba(76,175,80,.1);padding:1px 7px;border-radius:7px">${shortId}</span>
+            <span style="font-size:11px;color:${isDone ? '#9E8E82' : '#6B5E52'};${isDone ? 'text-decoration:line-through' : ''}">${row.customerName}</span>
           </div>
-          <p style="font-size:14px;font-weight:600;${isDone ? 'text-decoration:line-through;color:#6B5E52' : 'color:#2C1810'}">${order.customerName}</p>
-          <p style="font-size:12px;color:#6B5E52;${isDone ? 'text-decoration:line-through;opacity:.6' : ''}">${order.items.map(it => `${it.name}${it.qty > 1 ? ' ×' + it.qty : ''}`).join(', ')}</p>
         </div>
-        ${isDone ? '<span style="font-size:11px;color:#4caf50;font-weight:600">Collected ✓</span>' : ''}`;
+        ${isDone ? '<span style="font-size:11px;color:#4caf50;font-weight:600;flex-shrink:0">Collected ✓</span>' : ''}`;
     }
 
     list.insertBefore(card, empty);
   });
 }
 
-window._moveToPrep = async (orderId) => {
-  if (!preparingOrder.includes(orderId)) preparingOrder.push(orderId);
-  await setDoc(doc(db, 'orders', orderId), { status: 'preparing' }, { merge: true });
+// ── Item-level Firestore mutations ─────────────────
+
+// Helper: recalculate and sync the top-level order.status from itemStatuses
+async function syncOrderStatus(orderId, newItemStatuses) {
+  const vals = Object.values(newItemStatuses);
+  let orderStatus = 'placed';
+  if (vals.length && vals.every(v => v === 'ready')) orderStatus = 'ready';
+  else if (vals.length && vals.every(v => v !== 'placed')) orderStatus = 'preparing';
+  else if (vals.some(v => v !== 'placed')) orderStatus = 'preparing';
+  await setDoc(doc(db, 'orders', orderId), { status: orderStatus }, { merge: true });
+}
+
+window._itemToPrep = async (orderId, itemName) => {
+  const snap = await getDoc(doc(db, 'orders', orderId));
+  if (!snap.exists()) return;
+  const order = snap.data();
+  const newStatuses = { ...(order.itemStatuses || {}), [itemName]: 'preparing' };
+  const newSeq      = { ...(order.itemPrepSeq  || {}), [itemName]: Date.now() };
+  await setDoc(doc(db, 'orders', orderId), { itemStatuses: newStatuses, itemPrepSeq: newSeq }, { merge: true });
+  await syncOrderStatus(orderId, newStatuses);
 };
 
-window._moveToReady = async (orderId) => {
-  await setDoc(doc(db, 'orders', orderId), { status: 'ready' }, { merge: true });
+window._itemToReady = async (orderId, itemName) => {
+  const snap = await getDoc(doc(db, 'orders', orderId));
+  if (!snap.exists()) return;
+  const order = snap.data();
+  const newStatuses = { ...(order.itemStatuses || {}), [itemName]: 'ready' };
+  await setDoc(doc(db, 'orders', orderId), { itemStatuses: newStatuses }, { merge: true });
+  await syncOrderStatus(orderId, newStatuses);
 };
 
-window._toggleCollected = async (orderId, currentDone) => {
-  await setDoc(doc(db, 'orders', orderId), { collectedByCustomer: !currentDone }, { merge: true });
+window._itemToggleCollected = async (orderId, itemName, currentDone) => {
+  const snap = await getDoc(doc(db, 'orders', orderId));
+  if (!snap.exists()) return;
+  const order = snap.data();
+  const newCollected = { ...(order.itemCollected || {}), [itemName]: !currentDone };
+  await setDoc(doc(db, 'orders', orderId), { itemCollected: newCollected }, { merge: true });
 };
 
 
@@ -1030,7 +1101,9 @@ async function placeOrder() {
     const items = MENU.filter(m => state.cart[m.name] > 0).map(m => ({ name: m.name, qty: state.cart[m.name], price: m.price }));
     const total = items.reduce((s, it) => s + it.qty * it.price, 0);
     const orderId = await getNextOrderId();
-    const order = { orderId, items, total, timestamp: new Date().toISOString(), status: 'placed' };
+    const itemStatuses = {};
+    items.forEach(it => { itemStatuses[it.name] = 'placed'; });
+    const order = { orderId, items, total, timestamp: new Date().toISOString(), status: 'placed', itemStatuses };
     await saveOrder(order, state.user.phoneNumber, state.user.name);
     state.user.orders = [...(state.user.orders || []), order];
     state.currentOrder = order;

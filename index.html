@@ -503,6 +503,21 @@ const MENU = [
 ];
 
 let state = { user: null, cart: {}, currentOrder: null, orderStatusUnsub: null };
+
+// ── SESSION PERSISTENCE ───────────────────────────────────────────────────
+function saveSession() {
+  if (state.user) {
+    sessionStorage.setItem('caff_session', JSON.stringify({
+      user: state.user,
+      currentScreen: document.querySelector('.screen.active')?.id || 's-landing'
+    }));
+  } else {
+    sessionStorage.removeItem('caff_session');
+  }
+}
+function clearSession() {
+  sessionStorage.removeItem('caff_session');
+}
 let adminUnsubscribe = null;
   let prevOrderUnsubs = [];
 let cachedOrders = [];
@@ -626,6 +641,7 @@ function confirmReset() { openModal('modal-reset'); }
 function doReset() {
   closeModal('modal-reset');
   state.user = null; state.cart = {}; state.currentOrder = null;
+  clearSession();
   document.getElementById('inp-name').value = '';
   document.getElementById('inp-phone').value = '';
   goTo('s-landing');
@@ -633,14 +649,35 @@ function doReset() {
 function adminLogout() {
   if (adminUnsubscribe) { adminUnsubscribe(); adminUnsubscribe = null; }
   state.user = null;
+  clearSession();
   document.getElementById('inp-name').value = '';
   document.getElementById('inp-phone').value = '';
   goTo('s-landing');
 }
 
 // ── LANDING ───────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   document.querySelectorAll('#s-landing .land-anim').forEach(a => a.classList.add('play'));
+  // Restore session after page refresh
+  const saved = sessionStorage.getItem('caff_session');
+  if (saved) {
+    try {
+      const { user, currentScreen } = JSON.parse(saved);
+      if (user) {
+        state.user = user;
+        if (user.isAdmin) {
+          await renderAdminDashboard();
+          goTo('s-admin');
+        } else {
+          // Re-fetch customer data to get latest orders
+          const fresh = await getCustomer(user.phoneNumber);
+          if (fresh) state.user = fresh;
+          renderMenu();
+          goTo(currentScreen && currentScreen !== 's-landing' ? currentScreen : 's-menu');
+        }
+      }
+    } catch(e) { sessionStorage.removeItem('caff_session'); }
+  }
 });
 document.getElementById('inp-phone').addEventListener('input', e => {
   e.target.value = e.target.value.replace(/\D/g,'').slice(0,10);
@@ -672,6 +709,8 @@ document.getElementById('btn-enter').addEventListener('click', async () => {
     else customer.name = name;
     await saveCustomer(customer);
     state.user = customer;
+    saveSession();
+    resetIdleTimer();
     showToast(customer.orders.length > 0 ? 'Welcome back, '+customer.name+'! ☕' : 'Hey '+customer.name+"! Let's get brewing 🫶");
     renderMenu();
     setTimeout(() => goTo('s-menu'), 300);
@@ -955,9 +994,42 @@ function statusLabel(status) {
   return map[status] || map['placed'];
 }
 
+let prevOrderPollInterval = null;
+
 function cleanupPrevOrderListeners() {
   prevOrderUnsubs.forEach(u => u());
   prevOrderUnsubs = [];
+  if (prevOrderPollInterval) { clearInterval(prevOrderPollInterval); prevOrderPollInterval = null; }
+}
+
+function startPrevOrderPolling() {
+  if (prevOrderPollInterval) clearInterval(prevOrderPollInterval);
+  prevOrderPollInterval = setInterval(async () => {
+    if (!state.user || !state.user.orders || !state.user.orders.length) return;
+    // Refresh each order's status from Firestore
+    for (const order of state.user.orders) {
+      try {
+        const snap = await getDoc(doc(db, 'orders', order.orderId));
+        if (!snap.exists()) continue;
+        const data = snap.data();
+        const badge = document.getElementById('prev-status-' + order.orderId);
+        if (badge) {
+          const s = statusLabel(data.status || 'placed');
+          badge.className = 'status-badge ' + s.cls;
+          badge.style.cssText = 'font-size:10px;padding:2px 8px';
+          badge.textContent = s.txt;
+        }
+        const itemsEl = document.getElementById('prev-item-statuses-' + order.orderId);
+        if (itemsEl) itemsEl.innerHTML = renderPrevItemStatusesHtml({ ...order, ...data });
+        // Also show a toast if order just became ready
+        const prev = order._lastKnownStatus;
+        if (data.status === 'ready' && prev !== 'ready') {
+          showToast('Your order ' + order.orderId.replace('ORD-','#') + ' is ready! ✓');
+        }
+        order._lastKnownStatus = data.status;
+      } catch(e) { /* silent */ }
+    }
+  }, 15000);
 }
 
 function renderPrevItemStatusesHtml(order) {
@@ -1053,6 +1125,7 @@ function renderPrevOrders() {
     });
     prevOrderUnsubs.push(unsub);
   });
+  startPrevOrderPolling();
 }
 function togglePrev(el) {
   const pd = el.parentElement.querySelector('.pd');
@@ -1273,6 +1346,34 @@ async function clearAllData() {
   finally { hideLoading(); }
 }
 
+
+// ── INACTIVITY TIMEOUT (30 min) ───────────────────────────────────────────
+const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+let idleTimer = null;
+
+function resetIdleTimer() {
+  if (!state.user) return; // Only track when logged in
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (!state.user) return;
+    if (state.user.isAdmin) {
+      adminLogout();
+    } else {
+      state.user = null; state.cart = {}; state.currentOrder = null;
+      clearSession();
+      cleanupPrevOrderListeners();
+      if (state.orderStatusUnsub) { state.orderStatusUnsub(); state.orderStatusUnsub = null; }
+      goTo('s-landing');
+    }
+    showToast('Logged out due to inactivity ✦');
+  }, IDLE_TIMEOUT);
+}
+
+// Reset timer on any user interaction
+['touchstart','touchmove','mousedown','mousemove','keydown','scroll','click'].forEach(evt => {
+  document.addEventListener(evt, resetIdleTimer, { passive: true });
+});
+
 // ── EXPOSE ────────────────────────────────────────────────────────────────
 window.goHome=goHome; window.goTo=goTo; window.openModal=openModal; window.closeModal=closeModal;
 window.confirmReset=confirmReset; window.doReset=doReset; window.adminLogout=adminLogout;
@@ -1281,6 +1382,7 @@ window.togglePrev=togglePrev; window.switchTab=switchTab;
 window.toggleOCard=typeof toggleOCard!=="undefined"?toggleOCard:function(){};
 window.downloadExcel=downloadExcel; window.sendWhatsAppReport=sendWhatsAppReport;
 window.clearAllData=clearAllData; window.payNow=payNow;
+window.saveSession=saveSession; window.clearSession=clearSession; window.resetIdleTimer=resetIdleTimer;
 </script>
 </body>
 </html>

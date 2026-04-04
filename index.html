@@ -772,7 +772,7 @@
     <!-- ══════════ SCREEN 1: LANDING ══════════ -->
     <div class="screen active" id="s-landing" style="padding:40px 24px 36px;gap:24px">
       <div class="land-anim d1" style="text-align:center">
-        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 4.4
+        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 3.0
         </p>
       </div>
       <div class="land-anim d2" style="display:flex;flex-direction:column;align-items:center;gap:16px">
@@ -1052,7 +1052,7 @@
           Pay Now · <span id="pay-now-amount">₹0</span>
         </button>
 
-        <button onclick="goTo('s-menu')" class="btn-outline">+ Order more</button>
+        <button onclick="state.cart={};renderMenu();goTo('s-menu')" class="btn-outline">+ Order more</button>
         <p style="text-align:center;font-size:12px;color:rgba(107,94,82,.4)">Thank you for coming ✦ Come back soon</p>
       </div>
     </div>
@@ -1322,7 +1322,17 @@
       if (_audioCtx.state === 'suspended') _audioCtx.resume();
       return _audioCtx;
     }
-    function playTone(freq, type, duration, gainPeak, fadeStart) {
+
+    // Unlock audio context on first touch/click (required on iOS/Android)
+    function _unlockAudio() {
+      try { getAudioCtx(); } catch(e) {}
+      document.removeEventListener('touchstart', _unlockAudio);
+      document.removeEventListener('mousedown',  _unlockAudio);
+    }
+    document.addEventListener('touchstart', _unlockAudio, { once: true, passive: true });
+    document.addEventListener('mousedown',  _unlockAudio, { once: true, passive: true });
+
+    function playTone(freq, type, duration, gainPeak) {
       try {
         const ctx = getAudioCtx();
         const osc = ctx.createOscillator();
@@ -1332,61 +1342,98 @@
         gain.gain.setValueAtTime(gainPeak, ctx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
         osc.start(ctx.currentTime); osc.stop(ctx.currentTime + duration);
-      } catch(e) { /* audio blocked — silent fail */ }
-    }
-    // Short satisfying "pop" — card moved to Preparing
-    function soundPrep() {
-      try {
-        const ctx = getAudioCtx();
-        // Noise burst (click body)
-        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
-        const data = buf.getChannelData(0);
-        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
-        const src = ctx.createBufferSource();
-        src.buffer = buf;
-        const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 280; f.Q.value = 0.8;
-        const g = ctx.createGain(); g.gain.setValueAtTime(0.35, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
-        src.connect(f); f.connect(g); g.connect(ctx.destination);
-        src.start();
-        // Tone tail
-        playTone(320, 'sine', 0.12, 0.18, 0.08);
       } catch(e) {}
     }
-    // Bright ascending two-tone chime — card moved to Ready
-    function soundReady() {
-      try {
-        const ctx = getAudioCtx();
-        const notes = [880, 1108]; // A5 → C#6
-        notes.forEach((freq, i) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.type = 'sine'; osc.frequency.value = freq;
-          const t = ctx.currentTime + i * 0.13;
-          gain.gain.setValueAtTime(0, t);
-          gain.gain.linearRampToValueAtTime(0.22, t + 0.02);
-          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
-          osc.start(t); osc.stop(t + 0.35);
-        });
-      } catch(e) {}
-    }
-    // Soft low thud — collected
-    function soundCollect() {
-      playTone(140, 'sine', 0.18, 0.28, 0.05);
-    }
-    // New order arrives on admin screen
+
+    // ── ADMIN: New order arrives — bright upward arpeggio ──────────────────
     function soundNewOrder() {
       try {
         const ctx = getAudioCtx();
-        [523, 659, 784].forEach((freq, i) => { // C5 E5 G5 — bright major arpeggio
+        // C5 → E5 → G5 → C6 quick ascending arpeggio
+        [[523,0],[659,.1],[784,.2],[1047,.33]].forEach(([freq, delay]) => {
           const osc = ctx.createOscillator(); const g = ctx.createGain();
           osc.connect(g); g.connect(ctx.destination);
           osc.type = 'triangle'; osc.frequency.value = freq;
-          const t = ctx.currentTime + i * 0.1;
-          g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.14, t + 0.02);
-          g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
-          osc.start(t); osc.stop(t + 0.3);
+          const t = ctx.currentTime + delay;
+          g.gain.setValueAtTime(0, t);
+          g.gain.linearRampToValueAtTime(0.16, t + 0.025);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+          osc.start(t); osc.stop(t + 0.35);
         });
+        // Subtle noise "whoosh" underneath
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.18, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * (1 - i/d.length) * 0.08;
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 800;
+        const g2 = ctx.createGain(); g2.gain.setValueAtTime(0.5, ctx.currentTime);
+        src.connect(f); f.connect(g2); g2.connect(ctx.destination);
+        src.start();
+      } catch(e) {}
+    }
+
+    // ── ADMIN: Prep button — satisfying mechanical "thock" + rising tone ───
+    function soundPrep() {
+      try {
+        const ctx = getAudioCtx();
+        // Noise click body
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.06, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random()*2-1) * (1 - i/data.length) * 0.9;
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 320; f.Q.value = 1.2;
+        const g = ctx.createGain(); g.gain.setValueAtTime(0.45, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+        src.connect(f); f.connect(g); g.connect(ctx.destination);
+        src.start();
+        // Rising confirmation tone E4 → A4
+        [[330, 0, 0.13],[440, 0.09, 0.18]].forEach(([freq, delay, dur]) => {
+          const osc = ctx.createOscillator(); const gv = ctx.createGain();
+          osc.connect(gv); gv.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          const t = ctx.currentTime + delay;
+          gv.gain.setValueAtTime(0, t); gv.gain.linearRampToValueAtTime(0.14, t + 0.02);
+          gv.gain.exponentialRampToValueAtTime(0.001, t + dur);
+          osc.start(t); osc.stop(t + dur + 0.05);
+        });
+      } catch(e) {}
+    }
+
+    // ── ADMIN: Ready button — bright satisfying two-tone chime ─────────────
+    function soundReady() {
+      try {
+        const ctx = getAudioCtx();
+        // G5 → B5 → D6 — a happy G major chord arpeggio
+        [[784,0,0.38],[988,0.11,0.34],[1175,0.22,0.42]].forEach(([freq, delay, dur]) => {
+          const osc = ctx.createOscillator(); const g = ctx.createGain();
+          osc.connect(g); g.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          const t = ctx.currentTime + delay;
+          g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.2, t + 0.025);
+          g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+          osc.start(t); osc.stop(t + dur + 0.05);
+        });
+        // Warm click attack
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
+        const bd = buf.getChannelData(0);
+        for (let i = 0; i < bd.length; i++) bd[i] = (Math.random()*2-1) * (1 - i/bd.length) * 0.3;
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const gn = ctx.createGain(); gn.gain.setValueAtTime(0.5, ctx.currentTime);
+        src.connect(gn); gn.connect(ctx.destination); src.start();
+      } catch(e) {}
+    }
+
+    // ── ADMIN: Collect (checkbox tick) — soft low thud ─────────────────────
+    function soundCollect() {
+      try {
+        const ctx = getAudioCtx();
+        playTone(180, 'sine', 0.22, 0.22);
+        // Tiny click
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.025, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * (1 - i/d.length) * 0.5;
+        const src = ctx.createBufferSource(); src.buffer = buf;
+        const g = ctx.createGain(); g.gain.setValueAtTime(0.35, ctx.currentTime);
+        src.connect(g); g.connect(ctx.destination); src.start();
       } catch(e) {}
     }
 
@@ -1596,6 +1643,8 @@
     function doReset() {
       closeModal('modal-reset');
       state.user = null; state.cart = {}; state.currentOrder = null;
+      if (_readyWatchUnsub) { _readyWatchUnsub(); _readyWatchUnsub = null; }
+      _bannerShownForOrder = null;
       clearSession();
       document.getElementById('inp-name').value = '';
       document.getElementById('inp-phone').value = '';
@@ -1765,6 +1814,10 @@
       const key = itemName + ':' + unitIdx;
       return (order.itemPrepSeq && order.itemPrepSeq[key]) || 0;
     }
+    function getUnitReadySeq(order, itemName, unitIdx) {
+      const key = itemName + ':' + unitIdx;
+      return (order.itemReadySeq && order.itemReadySeq[key]) || 0;
+    }
     function getUnitCollected(order, itemName, unitIdx) {
       const key = itemName + ':' + unitIdx;
       return (order.itemCollected && order.itemCollected[key]) || false;
@@ -1779,11 +1832,12 @@
             const key = it.name + ':' + u;
             const status = getUnitStatus(order, it.name, u);
             const prepSeq = getUnitPrepSeq(order, it.name, u);
+            const readySeq = getUnitReadySeq(order, it.name, u);
             const collected = getUnitCollected(order, it.name, u);
             rows.push({
               orderId: order.orderId, customerName: order.customerName,
               itemName: it.name, unitIdx: u, timestamp: order.timestamp,
-              status, prepSeq, collected, key
+              status, prepSeq, readySeq, collected, key
             });
           }
         });
@@ -1824,7 +1878,7 @@
       const allRows = buildDrinkRows();
       const newRows   = allRows.filter(r => r.status === 'placed').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
       const prepRows  = allRows.filter(r => r.status === 'preparing').sort((a, b) => (a.prepSeq || 0) - (b.prepSeq || 0) || new Date(a.timestamp) - new Date(b.timestamp));
-      const readyRows = allRows.filter(r => r.status === 'ready').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      const readyRows = allRows.filter(r => r.status === 'ready').sort((a, b) => (b.readySeq || 0) - (a.readySeq || 0) || new Date(b.timestamp) - new Date(a.timestamp));
 
       document.getElementById('q-new-count').textContent   = newRows.length;
       document.getElementById('q-prep-count').textContent  = prepRows.length;
@@ -1832,7 +1886,7 @@
 
       renderItemQueue('q-new-list',   'q-new-empty',   newRows,   'new');
       renderItemQueue('q-prep-list',  'q-prep-empty',  prepRows,  'prep');
-      renderItemQueue('q-ready-list', 'q-ready-empty', readyRows, 'ready');
+      renderReadyQueue('q-ready-list', 'q-ready-empty', readyRows);
       startAgeTimers();
     }
 
@@ -1925,7 +1979,103 @@
       });
     }
 
-    // syncOrderStatus is now inlined into each updateDoc call above.
+    // ── READY QUEUE: grouped by order, newest first, with "Collect All" per order ──
+    function renderReadyQueue(listId, emptyId, rows) {
+      const list  = document.getElementById(listId);
+      const empty = document.getElementById(emptyId);
+      [...list.querySelectorAll('.q-card,.ready-order-group')].forEach(el => el.remove());
+      if (!rows.length) { empty.style.display = 'block'; return; }
+      empty.style.display = 'none';
+
+      // Group rows by orderId, preserving newest-first order
+      const orderMap = new Map();
+      rows.forEach(row => {
+        if (!orderMap.has(row.orderId)) orderMap.set(row.orderId, []);
+        orderMap.get(row.orderId).push(row);
+      });
+
+      orderMap.forEach((orderRows, orderId) => {
+        const shortId = orderId.replace('ORD-', '#');
+        const customerName = orderRows[0].customerName;
+        const allDone = orderRows.every(r => r.collected);
+        const anyUncollected = orderRows.some(r => !r.collected);
+        const safeOId = orderId.replace(/'/g, "\\'");
+
+        // Build the collect-all items payload for the button
+        const unitsList = orderRows.map(r => `${r.itemName.replace(/'/g,"\\'")}:${r.unitIdx}`).join(',');
+
+        // Order group wrapper
+        const group = document.createElement('div');
+        group.className = 'ready-order-group';
+        group.style.cssText = `background:${allDone ? 'rgba(76,175,80,.04)' : 'rgba(255,255,255,.9)'};border:1.5px solid ${allDone ? 'rgba(76,175,80,.3)' : 'rgba(76,175,80,.35)'};border-radius:16px;margin-bottom:10px;overflow:hidden;transition:all .2s`;
+
+        // Group header with customer name + Collect All button
+        const headerHtml = `
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:${allDone ? 'rgba(76,175,80,.08)' : 'rgba(76,175,80,.06)'};border-bottom:1px solid rgba(76,175,80,.15)">
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:11px;font-weight:700;color:#2e7d32;background:rgba(76,175,80,.15);padding:2px 8px;border-radius:7px">${shortId}</span>
+              <span style="font-size:12px;font-weight:600;color:#2C1810">${customerName}</span>
+              <span style="font-size:11px;color:#6B5E52">${orderRows.length} item${orderRows.length > 1 ? 's' : ''}</span>
+            </div>
+            ${anyUncollected ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>` : `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>`}
+          </div>`;
+
+        // Individual item rows
+        const itemsHtml = orderRows.map(row => {
+          const emoji = menuEmojiFor(row.itemName);
+          const isDone = row.collected;
+          const safeItm = row.itemName.replace(/'/g, "\\'");
+          return `
+            <div class="q-card" data-key="${row.orderId}:${row.itemName}:${row.unitIdx}" style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid rgba(76,175,80,.08);transition:all .2s;${isDone ? 'opacity:.55' : ''}">
+              <button onclick="window._unitToggleCollected('${safeOId}','${safeItm}',${row.unitIdx},${isDone},this)" style="width:24px;height:24px;border-radius:50%;border:2px solid #4caf50;background:${isDone ? '#4caf50' : 'none'};cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s">
+                ${isDone ? '<svg width="11" height="11" viewBox="0 0 14 14" fill="none"><polyline points="2,7 5.5,10.5 12,3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
+              </button>
+              <span style="font-size:20px;flex-shrink:0">${emoji}</span>
+              <p style="font-size:13px;font-weight:500;flex:1;${isDone ? 'text-decoration:line-through;color:#9E8E82' : 'color:#2C1810'}">${row.itemName}</p>
+              ${isDone ? '<span style="font-size:10px;color:#4caf50;font-weight:700;flex-shrink:0">✓</span>' : ''}
+            </div>`;
+        }).join('');
+
+        group.innerHTML = headerHtml + `<div>${itemsHtml}</div>`;
+        list.insertBefore(group, empty);
+      });
+    }
+
+    // ── Collect all units for an entire order at once ──
+    window._collectAllForOrder = async (orderId, btnEl) => {
+      soundCollect(); haptic([25, 20, 25]);
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      if (!cached) return;
+
+      // Optimistic local update
+      const updates = {};
+      cached.items.forEach(it => {
+        for (let u = 0; u < it.qty; u++) {
+          const key = it.name + ':' + u;
+          const stKey = it.name + ':' + u;
+          if ((cached.itemStatuses && cached.itemStatuses[stKey]) === 'ready') {
+            cached.itemCollected = cached.itemCollected || {};
+            cached.itemCollected[key] = true;
+            updates[`itemCollected.${key}`] = true;
+          }
+        }
+      });
+
+      // Flash and remove the whole group card
+      const group = btnEl ? btnEl.closest('.ready-order-group') : null;
+      if (group) {
+        group.style.transition = 'opacity .35s,transform .35s';
+        group.style.opacity = '0';
+        group.style.transform = 'scale(.97)';
+        setTimeout(() => { group.remove(); }, 350);
+      }
+      debouncedRenderOrders();
+
+      if (Object.keys(updates).length) {
+        try { await updateDoc(doc(db, 'orders', orderId), updates); }
+        catch(e) { console.error('_collectAllForOrder write failed', e); }
+      }
+    };
     // Kept as a stub so any stale references don't crash.
     async function syncOrderStatus(orderId, itemStatuses) {
       const vals = Object.values(itemStatuses);
@@ -1975,9 +2125,11 @@
 
       // ── Optimistic local update ───────────────────────────────────────────
       const cached = cachedOrders.find(o => o.orderId === orderId);
+      const now = Date.now();
       if (cached) {
         const key = itemName + ':' + unitIdx;
-        cached.itemStatuses = { ...(cached.itemStatuses || {}), [key]: 'ready' };
+        cached.itemStatuses  = { ...(cached.itemStatuses  || {}), [key]: 'ready' };
+        cached.itemReadySeq  = { ...(cached.itemReadySeq  || {}), [key]: now     };
         const vals = Object.values(cached.itemStatuses);
         cached.status = vals.every(v => v === 'ready') ? 'ready'
                       : vals.some(v => v !== 'placed') ? 'preparing' : 'placed';
@@ -1990,7 +2142,8 @@
         if (cached) {
           const key = itemName + ':' + unitIdx;
           await updateDoc(doc(db, 'orders', orderId), {
-            [`itemStatuses.${key}`]: 'ready',
+            [`itemStatuses.${key}`]:  'ready',
+            [`itemReadySeq.${key}`]:  now,
             status: cached.status
           });
         }
@@ -2332,6 +2485,7 @@ async function placeOrder() {
             state.user.orders = [...(state.user.orders || []), order];
             state.currentOrder = order;
             state.cart = {};
+            watchOrderForReady(order); // global listener — fires banner on ANY screen
             showToast('Order placed! ☕');
             renderPayment();
             setTimeout(() => goTo('s-payment'), 400);
@@ -2344,15 +2498,44 @@ async function placeOrder() {
 
 // ── CUSTOMER ORDER-READY BANNER ───────────────────────────────────────────
     let _bannerShownForOrder = null;
+    // Global per-order listener so the banner fires on ANY screen
+    let _readyWatchUnsub = null;
+    function watchOrderForReady(order) {
+      if (_readyWatchUnsub) { _readyWatchUnsub(); _readyWatchUnsub = null; }
+      if (!order || !order.orderId) return;
+      // If already ready when we start watching, show immediately
+      if (order.status === 'ready') { showReadyBanner(order); return; }
+      _readyWatchUnsub = onSnapshot(doc(db, 'orders', order.orderId), snap => {
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const merged = { ...order, ...data };
+        state.currentOrder = { ...state.currentOrder, ...data };
+        if (data.status === 'ready' && _bannerShownForOrder !== order.orderId) {
+          showReadyBanner(merged);
+        }
+      });
+    }
     function showReadyBanner(order) {
-      if (_bannerShownForOrder === order.orderId) return; // only show once per order
+      if (_bannerShownForOrder === order.orderId) return;
       _bannerShownForOrder = order.orderId;
       const items = order.items || [];
       document.getElementById('ready-banner-items').textContent =
         items.map(it => `${menuEmojiFor(it.name)} ${it.name}${it.qty > 1 ? ' ×' + it.qty : ''}`).join('  ·  ');
       document.getElementById('ready-banner').classList.add('show');
-      // Also vibrate the customer's phone
       haptic([100, 80, 100, 80, 200]);
+      // Play a pleasant chime for the customer
+      try {
+        const ctx = getAudioCtx();
+        [[523,0],[659,.12],[784,.24],[1047,.4]].forEach(([freq,delay]) => {
+          const osc = ctx.createOscillator(); const g = ctx.createGain();
+          osc.connect(g); g.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          const t = ctx.currentTime + delay;
+          g.gain.setValueAtTime(0,t); g.gain.linearRampToValueAtTime(0.18, t+.03);
+          g.gain.exponentialRampToValueAtTime(0.001, t+.5);
+          osc.start(t); osc.stop(t+.55);
+        });
+      } catch(e) {}
     }
     function dismissReadyBanner() {
       document.getElementById('ready-banner').classList.remove('show');
@@ -2368,17 +2551,15 @@ function renderPayment() {
           document.getElementById('pay-items-count').textContent = o.items.length + ' item' + (o.items.length > 1 ? 's' : '');
           renderPayItemStatuses(o);
 
+          // Keep a lightweight snapshot here for per-item pill updates on the payment screen.
+          // The ready banner itself is handled globally by watchOrderForReady() so it fires
+          // on any screen — no duplicate check needed here.
           if (state.orderStatusUnsub) state.orderStatusUnsub();
           state.orderStatusUnsub = onSnapshot(doc(db, 'orders', o.orderId), snap => {
             if (!snap.exists()) return;
             const data = snap.data();
             state.currentOrder = { ...state.currentOrder, ...data };
             renderPayItemStatuses(state.currentOrder);
-            // Show full-screen banner when order flips to ready
-            if (data.status === 'ready' && state.currentOrder._lastStatus !== 'ready') {
-              showReadyBanner(state.currentOrder);
-            }
-            state.currentOrder._lastStatus = data.status;
           });
         }
 

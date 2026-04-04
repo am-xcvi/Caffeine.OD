@@ -7,7 +7,7 @@
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <title>Caffeine OD</title>
+  <title>Caffeine OD v4.4</title>
   <link
     href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@300;400;500;600&family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,700;1,6..96,400&display=swap"
     rel="stylesheet">
@@ -772,7 +772,7 @@
     <!-- ══════════ SCREEN 1: LANDING ══════════ -->
     <div class="screen active" id="s-landing" style="padding:40px 24px 36px;gap:24px">
       <div class="land-anim d1" style="text-align:center">
-        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 4.3
+        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 4.4
         </p>
       </div>
       <div class="land-anim d2" style="display:flex;flex-direction:column;align-items:center;gap:16px">
@@ -1296,7 +1296,7 @@
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-    import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, deleteDoc, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyBbSX6bSGl6B0ioeveN8BKPUSZZIDwufMU",
@@ -1396,18 +1396,17 @@
     }
 
     // ── CARD FLASH + REMOVE ───────────────────────────────
-    // Registers the move as pending so snapshot re-renders are held off,
-    // flashes the card with colour, then removes it and clears pending.
+    // Immediately removes card from DOM (optimistic) and triggers a re-render
+    // from the already-updated cachedOrders. The Firestore snapshot arriving
+    // later is a no-op since the local state matches.
     function flashAndRemove(cardEl, flashClass, moveKey, delay = 450) {
       if (moveKey) _pendingMoves.add(moveKey);
       cardEl.classList.add(flashClass);
+      // Re-render from optimistic cache immediately — don't wait for Firestore
+      debouncedRenderOrders();
       setTimeout(() => {
         cardEl.remove();
-        if (moveKey) {
-          _pendingMoves.delete(moveKey);
-          // Now that the animation is done, trigger a clean re-render
-          debouncedRenderOrders();
-        }
+        if (moveKey) _pendingMoves.delete(moveKey);
       }, delay);
     }
 
@@ -1442,19 +1441,13 @@
     // Keys of units currently mid-flash-animation — snapshot re-renders are suppressed
     // for these until the animation completes, preventing the "vanish then reappear" glitch.
     const _pendingMoves = new Set();
-    // Debounce: prevents re-rendering the order list on every single Firestore event
-    // when 50 users place orders simultaneously — batches updates into one render per 300ms
+    // Debounce: batches rapid Firestore events into one render per 80ms.
+    // We no longer block on _pendingMoves — optimistic local updates already
+    // removed the card visually, so the snapshot re-render is safe to run immediately.
     let _renderOrdersTimer = null;
     function debouncedRenderOrders() {
       clearTimeout(_renderOrdersTimer);
-      _renderOrdersTimer = setTimeout(() => {
-        // If cards are still mid-flash, wait until they finish before re-rendering
-        if (_pendingMoves.size > 0) {
-          debouncedRenderOrders(); // retry in another 300ms
-          return;
-        }
-        renderOrdersTab();
-      }, 300);
+      _renderOrdersTimer = setTimeout(() => renderOrdersTab(), 80);
     }
     let currentTab = 'orders';
 
@@ -1932,61 +1925,108 @@
       });
     }
 
-    // ── Firestore mutations (unit-level) ──────────────────────────────────────
+    // syncOrderStatus is now inlined into each updateDoc call above.
+    // Kept as a stub so any stale references don't crash.
     async function syncOrderStatus(orderId, itemStatuses) {
       const vals = Object.values(itemStatuses);
       let s = 'placed';
       if (vals.length && vals.every(v => v === 'ready')) s = 'ready';
       else if (vals.length && vals.some(v => v !== 'placed')) s = 'preparing';
-      await setDoc(doc(db, 'orders', orderId), { status: s }, { merge: true });
+      try { await updateDoc(doc(db, 'orders', orderId), { status: s }); } catch(e) {}
     }
 
     window._unitToPrep = async (orderId, itemName, unitIdx, btnEl) => {
       soundPrep(); haptic(40);
       const moveKey = `${orderId}:${itemName}:${unitIdx}`;
       const card = btnEl ? btnEl.closest('.q-card') : null;
+
+      // ── Optimistic local update: mutate cachedOrders immediately so the
+      //    re-render triggered by flashAndRemove sees the new state at once.
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      if (cached) {
+        const key = itemName + ':' + unitIdx;
+        cached.itemStatuses = { ...(cached.itemStatuses || {}), [key]: 'preparing' };
+        cached.itemPrepSeq  = { ...(cached.itemPrepSeq  || {}), [key]: Date.now()  };
+        // Compute & update top-level status locally too
+        const vals = Object.values(cached.itemStatuses);
+        cached.status = vals.every(v => v === 'ready') ? 'ready'
+                      : vals.some(v => v !== 'placed') ? 'preparing' : 'placed';
+      }
+
       if (card) flashAndRemove(card, 'card-flash-prep', moveKey);
-      const snap = await getDoc(doc(db, 'orders', orderId));
-      if (!snap.exists()) return;
-      const order = snap.data();
-      const key = itemName + ':' + unitIdx;
-      const newSt  = { ...(order.itemStatuses || {}), [key]: 'preparing' };
-      const newSeq = { ...(order.itemPrepSeq  || {}), [key]: Date.now()  };
-      await setDoc(doc(db, 'orders', orderId), { itemStatuses: newSt, itemPrepSeq: newSeq }, { merge: true });
-      await syncOrderStatus(orderId, newSt);
+
+      // ── Single Firestore write (no getDoc round-trip) ────────────────────
+      try {
+        if (cached) {
+          const key = itemName + ':' + unitIdx;
+          await updateDoc(doc(db, 'orders', orderId), {
+            [`itemStatuses.${key}`]: 'preparing',
+            [`itemPrepSeq.${key}`]:  Date.now(),
+            status: cached.status
+          });
+        }
+      } catch (e) { console.error('_unitToPrep write failed', e); }
     };
 
     window._unitToReady = async (orderId, itemName, unitIdx, btnEl) => {
       soundReady(); haptic([30, 30, 60]);
       const moveKey = `${orderId}:${itemName}:${unitIdx}`;
       const card = btnEl ? btnEl.closest('.q-card') : null;
+
+      // ── Optimistic local update ───────────────────────────────────────────
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      if (cached) {
+        const key = itemName + ':' + unitIdx;
+        cached.itemStatuses = { ...(cached.itemStatuses || {}), [key]: 'ready' };
+        const vals = Object.values(cached.itemStatuses);
+        cached.status = vals.every(v => v === 'ready') ? 'ready'
+                      : vals.some(v => v !== 'placed') ? 'preparing' : 'placed';
+      }
+
       if (card) flashAndRemove(card, 'card-flash-ready', moveKey);
-      const snap = await getDoc(doc(db, 'orders', orderId));
-      if (!snap.exists()) return;
-      const order = snap.data();
-      const key = itemName + ':' + unitIdx;
-      const newSt = { ...(order.itemStatuses || {}), [key]: 'ready' };
-      await setDoc(doc(db, 'orders', orderId), { itemStatuses: newSt }, { merge: true });
-      await syncOrderStatus(orderId, newSt);
+
+      // ── Single Firestore write (no getDoc round-trip) ────────────────────
+      try {
+        if (cached) {
+          const key = itemName + ':' + unitIdx;
+          await updateDoc(doc(db, 'orders', orderId), {
+            [`itemStatuses.${key}`]: 'ready',
+            status: cached.status
+          });
+        }
+      } catch (e) { console.error('_unitToReady write failed', e); }
     };
 
     window._unitToggleCollected = async (orderId, itemName, unitIdx, currentDone, btnEl) => {
       soundCollect(); haptic(25);
       const moveKey = `${orderId}:${itemName}:${unitIdx}:collect`;
       const card = btnEl ? btnEl.closest('.q-card') : null;
-      if (!currentDone && card) flashAndRemove(card, 'card-flash-collect', moveKey, 350);
-      const snap = await getDoc(doc(db, 'orders', orderId));
-      if (!snap.exists()) return;
-      const order = snap.data();
-      const key = itemName + ':' + unitIdx;
-      const newCol = { ...(order.itemCollected || {}), [key]: !currentDone };
-      await setDoc(doc(db, 'orders', orderId), { itemCollected: newCol }, { merge: true });
+
+      // ── Optimistic local update ───────────────────────────────────────────
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      const newDone = !currentDone;
+      if (cached) {
+        const key = itemName + ':' + unitIdx;
+        cached.itemCollected = { ...(cached.itemCollected || {}), [key]: newDone };
+      }
+
+      if (newDone && card) flashAndRemove(card, 'card-flash-collect', moveKey, 350);
+      else if (!newDone) debouncedRenderOrders(); // un-check: just re-render in place
+
+      // ── Single Firestore write (no getDoc round-trip) ────────────────────
+      try {
+        const key = itemName + ':' + unitIdx;
+        await updateDoc(doc(db, 'orders', orderId), {
+          [`itemCollected.${key}`]: newDone
+        });
+      } catch (e) { console.error('_unitToggleCollected write failed', e); }
     };
 
     // ── PREP ALL: move every placed unit of a drink to preparing at once ──
     window._prepAllDrink = async (itemName) => {
       soundPrep(); haptic([40, 20, 40]);
-      // Flash and remove all matching new-queue cards, registering each as pending
+
+      // Flash and remove all matching new-queue cards
       document.querySelectorAll('#q-new-list .q-card').forEach(card => {
         const nameEl = card.querySelector('p');
         if (nameEl && nameEl.textContent.trim() === itemName) {
@@ -1994,10 +2034,12 @@
           flashAndRemove(card, 'card-flash-prep', moveKey);
         }
       });
+
+      const now = Date.now();
       const writes = [];
       for (const order of cachedOrders) {
-        const statuses = order.itemStatuses || {};
-        const prepSeq  = order.itemPrepSeq  || {};
+        const statuses = { ...(order.itemStatuses || {}) };
+        const prepSeq  = { ...(order.itemPrepSeq  || {}) };
         let changed = false;
         order.items.forEach(it => {
           if (it.name !== itemName) return;
@@ -2005,19 +2047,27 @@
             const key = itemName + ':' + u;
             if ((statuses[key] || 'placed') === 'placed') {
               statuses[key] = 'preparing';
-              prepSeq[key]  = Date.now();
+              prepSeq[key]  = now;
               changed = true;
             }
           }
         });
         if (changed) {
-          writes.push(
-            setDoc(doc(db, 'orders', order.orderId), { itemStatuses: statuses, itemPrepSeq: prepSeq }, { merge: true })
-              .then(() => syncOrderStatus(order.orderId, statuses))
-          );
+          // ── Optimistic local update ───────────────────────────────────────
+          order.itemStatuses = statuses;
+          order.itemPrepSeq  = prepSeq;
+          const vals = Object.values(statuses);
+          order.status = vals.every(v => v === 'ready') ? 'ready'
+                       : vals.some(v => v !== 'placed') ? 'preparing' : 'placed';
+
+          // ── Build dot-notation update map for a single write ─────────────
+          const upd = { status: order.status };
+          Object.entries(statuses).forEach(([k, v]) => { upd[`itemStatuses.${k}`] = v; });
+          Object.entries(prepSeq ).forEach(([k, v]) => { upd[`itemPrepSeq.${k}`]  = v; });
+          writes.push(updateDoc(doc(db, 'orders', order.orderId), upd));
         }
       }
-      await Promise.all(writes);
+      try { await Promise.all(writes); } catch(e) { console.error('_prepAllDrink write failed', e); }
     };
 
     function renderItemsTab() {
@@ -2086,39 +2136,11 @@
       if (prevOrderPollInterval) { clearInterval(prevOrderPollInterval); prevOrderPollInterval = null; }
     }
 
-    function startPrevOrderPolling() {
-      if (prevOrderPollInterval) clearInterval(prevOrderPollInterval);
-      // Stagger start by random 0-15s so 50 customers don't all hit Firestore at once
-      const jitter = Math.random() * 15000;
-      setTimeout(() => {
-        prevOrderPollInterval = setInterval(async () => {
-          if (!state.user || !state.user.orders || !state.user.orders.length) return;
-          // Refresh each order's status from Firestore
-          for (const order of state.user.orders) {
-            try {
-              const snap = await getDoc(doc(db, 'orders', order.orderId));
-              if (!snap.exists()) continue;
-              const data = snap.data();
-              const badge = document.getElementById('prev-status-' + order.orderId);
-              if (badge) {
-                const s = statusLabel(data.status || 'placed');
-                badge.className = 'status-badge ' + s.cls;
-                badge.style.cssText = 'font-size:10px;padding:2px 8px';
-                badge.textContent = s.txt;
-              }
-              const itemsEl = document.getElementById('prev-item-statuses-' + order.orderId);
-              if (itemsEl) itemsEl.innerHTML = renderPrevItemStatusesHtml({ ...order, ...data });
-              // Also show a toast if order just became ready
-              const prev = order._lastKnownStatus;
-              if (data.status === 'ready' && prev !== 'ready') {
-                showToast('Your order ' + order.orderId.replace('ORD-', '#') + ' is ready! ✓');
-              }
-              order._lastKnownStatus = data.status;
-            } catch (e) { /* silent */ }
-          }
-        }, 15000);
-      }, jitter);
-    }
+    // ── CUSTOMER PREV-ORDER LIVE LISTENERS ────────────────
+    // Real-time onSnapshot per order — zero polling delay.
+    // Called from renderPrevOrders() which already sets these up;
+    // startPrevOrderPolling is kept as a no-op for safety.
+    function startPrevOrderPolling() { /* replaced by onSnapshot listeners in renderPrevOrders */ }
 
     function renderPrevItemStatusesHtml(order) {
           return order.items.map(it => {
@@ -2193,27 +2215,32 @@ function renderPrevOrders() {
       </div>`;
             list.appendChild(wrap);
 
-            // Live Firestore listener — updates badge + item pills without re-rendering
+            // Live Firestore listener — zero-latency badge + item pill updates
+            let _prevLastStatus = order.status || 'placed';
             const unsub = onSnapshot(doc(db, 'orders', order.orderId), snap => {
               if (!snap.exists()) return;
               const data = snap.data();
+              const newStatus = data.status || 'placed';
               // Update status badge
               const badge = document.getElementById('prev-status-' + order.orderId);
               if (badge) {
-                const s = statusLabel(data.status || 'placed');
+                const s = statusLabel(newStatus);
                 badge.className = 'status-badge ' + s.cls;
                 badge.style.cssText = 'font-size:10px;padding:2px 8px';
                 badge.textContent = s.txt;
               }
               // Update item status pills
               const itemsEl = document.getElementById('prev-item-statuses-' + order.orderId);
-              if (itemsEl) {
-                itemsEl.innerHTML = renderPrevItemStatusesHtml({ ...order, ...data });
+              if (itemsEl) itemsEl.innerHTML = renderPrevItemStatusesHtml({ ...order, ...data });
+              // Toast when order flips to ready
+              if (newStatus === 'ready' && _prevLastStatus !== 'ready') {
+                showToast('Your order ' + order.orderId.replace('ORD-', '#') + ' is ready! ✓');
               }
+              _prevLastStatus = newStatus;
             });
             prevOrderUnsubs.push(unsub);
           });
-          startPrevOrderPolling();
+          // startPrevOrderPolling() is now a no-op — onSnapshot handles everything above
         }
 function togglePrev(el) {
           const pd = el.parentElement.querySelector('.pd');

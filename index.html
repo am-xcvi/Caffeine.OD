@@ -706,6 +706,63 @@
       background: rgba(76, 175, 80, .18);
       color: #2e7d32
     }
+
+    /* ── Queue card flash animation ── */
+    @keyframes cardFlashPrep {
+      0%   { background: rgba(255,255,255,.85); transform: scale(1); }
+      30%  { background: rgba(239,159,39,.25);  transform: scale(1.02); }
+      100% { background: rgba(239,159,39,.08);  transform: scale(1); opacity: 0; }
+    }
+    @keyframes cardFlashReady {
+      0%   { background: rgba(255,255,255,.85); transform: scale(1); }
+      30%  { background: rgba(76,175,80,.3);    transform: scale(1.02); }
+      100% { background: rgba(76,175,80,.08);   transform: scale(1); opacity: 0; }
+    }
+    @keyframes cardFlashCollect {
+      0%   { opacity: 1; }
+      100% { opacity: 0; transform: scale(.97); }
+    }
+    .card-flash-prep   { animation: cardFlashPrep   .45s ease forwards !important; pointer-events: none; }
+    .card-flash-ready  { animation: cardFlashReady  .45s ease forwards !important; pointer-events: none; }
+    .card-flash-collect{ animation: cardFlashCollect .35s ease forwards !important; pointer-events: none; }
+
+    /* ── Age timer pill ── */
+    .age-pill {
+      font-size: 10px; font-weight: 600; color: #9E8E82;
+      background: rgba(107,94,82,.08); border-radius: 6px;
+      padding: 1px 6px; flex-shrink: 0;
+    }
+    .age-pill.warn  { color: #854F0B; background: rgba(239,159,39,.15); }
+    .age-pill.alert { color: #c0392b; background: rgba(220,53,69,.12);  }
+
+    /* ── Prep-all group header ── */
+    .prep-all-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 6px 10px; margin-bottom: 4px;
+      background: rgba(55,138,221,.06); border-radius: 10px;
+      border: 1px solid rgba(55,138,221,.15);
+    }
+    .prep-all-btn {
+      background: #185FA5; color: #fff; border: none; border-radius: 8px;
+      padding: 4px 10px; font-family: 'DM Sans', sans-serif;
+      font-size: 10px; font-weight: 700; cursor: pointer; letter-spacing: .04em;
+      transition: background .15s;
+    }
+    .prep-all-btn:active { background: #1045a0; }
+
+    /* ── Customer "Order Ready" full-screen banner ── */
+    #ready-banner {
+      display: none; position: fixed; inset: 0; z-index: 9990;
+      background: rgba(44,24,16,.6); align-items: center; justify-content: center;
+      animation: mfade .3s ease;
+    }
+    #ready-banner.show { display: flex; }
+    .ready-banner-card {
+      background: #F5EFE0; border-radius: 28px; padding: 36px 28px 32px;
+      max-width: 340px; width: 90%; text-align: center;
+      animation: slideUp .4s cubic-bezier(.22,1,.36,1);
+      box-shadow: 0 24px 60px rgba(44,24,16,.35);
+    }
   </style>
 </head>
 
@@ -715,7 +772,7 @@
     <!-- ══════════ SCREEN 1: LANDING ══════════ -->
     <div class="screen active" id="s-landing" style="padding:40px 24px 36px;gap:24px">
       <div class="land-anim d1" style="text-align:center">
-        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 3.0
+        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 4.2
         </p>
       </div>
       <div class="land-anim d2" style="display:flex;flex-direction:column;align-items:center;gap:16px">
@@ -1226,6 +1283,17 @@
 
   </div><!-- end .app -->
 
+  <!-- ══════════ CUSTOMER ORDER-READY BANNER ══════════ -->
+  <div id="ready-banner">
+    <div class="ready-banner-card">
+      <div style="font-size:56px;margin-bottom:12px">☕</div>
+      <p class="fd" style="font-size:26px;font-weight:700;color:#2C1810;margin-bottom:6px">Your order is <em style="color:#2e7d32;font-weight:400">ready!</em></p>
+      <p style="font-size:14px;color:#6B5E52;line-height:1.6;margin-bottom:8px" id="ready-banner-items"></p>
+      <p style="font-size:13px;color:#6B5E52;margin-bottom:24px">Head over to the counter to pick up your order ✦</p>
+      <button onclick="dismissReadyBanner()" style="width:100%;background:#2C1810;color:#F5EFE0;border:none;border-radius:16px;padding:14px;font-family:'DM Sans',sans-serif;font-size:15px;font-weight:500;cursor:pointer">Got it! 👋</button>
+    </div>
+  </div>
+
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
     import { getFirestore, doc, getDoc, setDoc, collection, getDocs, deleteDoc, onSnapshot, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
@@ -1244,6 +1312,95 @@
     const WHATSAPP_NUMBER = '917205868933';
     const ADMIN_PHONE = '7205868933';
     const UPI_ID = '9600031343-1@ybl';
+
+    // ══════════════════════════════════════════════════════
+    // ── SOUND ENGINE (Web Audio API — zero network deps) ──
+    // ══════════════════════════════════════════════════════
+    let _audioCtx = null;
+    function getAudioCtx() {
+      if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (_audioCtx.state === 'suspended') _audioCtx.resume();
+      return _audioCtx;
+    }
+    function playTone(freq, type, duration, gainPeak, fadeStart) {
+      try {
+        const ctx = getAudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.type = type; osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        gain.gain.setValueAtTime(gainPeak, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+        osc.start(ctx.currentTime); osc.stop(ctx.currentTime + duration);
+      } catch(e) { /* audio blocked — silent fail */ }
+    }
+    // Short satisfying "pop" — card moved to Preparing
+    function soundPrep() {
+      try {
+        const ctx = getAudioCtx();
+        // Noise burst (click body)
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 280; f.Q.value = 0.8;
+        const g = ctx.createGain(); g.gain.setValueAtTime(0.35, ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+        src.connect(f); f.connect(g); g.connect(ctx.destination);
+        src.start();
+        // Tone tail
+        playTone(320, 'sine', 0.12, 0.18, 0.08);
+      } catch(e) {}
+    }
+    // Bright ascending two-tone chime — card moved to Ready
+    function soundReady() {
+      try {
+        const ctx = getAudioCtx();
+        const notes = [880, 1108]; // A5 → C#6
+        notes.forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.type = 'sine'; osc.frequency.value = freq;
+          const t = ctx.currentTime + i * 0.13;
+          gain.gain.setValueAtTime(0, t);
+          gain.gain.linearRampToValueAtTime(0.22, t + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+          osc.start(t); osc.stop(t + 0.35);
+        });
+      } catch(e) {}
+    }
+    // Soft low thud — collected
+    function soundCollect() {
+      playTone(140, 'sine', 0.18, 0.28, 0.05);
+    }
+    // New order arrives on admin screen
+    function soundNewOrder() {
+      try {
+        const ctx = getAudioCtx();
+        [523, 659, 784].forEach((freq, i) => { // C5 E5 G5 — bright major arpeggio
+          const osc = ctx.createOscillator(); const g = ctx.createGain();
+          osc.connect(g); g.connect(ctx.destination);
+          osc.type = 'triangle'; osc.frequency.value = freq;
+          const t = ctx.currentTime + i * 0.1;
+          g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.14, t + 0.02);
+          g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+          osc.start(t); osc.stop(t + 0.3);
+        });
+      } catch(e) {}
+    }
+
+    // ── HAPTICS ───────────────────────────────────────────
+    function haptic(pattern) {
+      try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
+    }
+
+    // ── CARD FLASH + REMOVE ───────────────────────────────
+    // Flashes a card with colour, then removes it after animation
+    function flashAndRemove(cardEl, flashClass, delay = 450) {
+      cardEl.classList.add(flashClass);
+      setTimeout(() => cardEl.remove(), delay);
+    }
 
     // ── CHANGE 1: Zen Pourover split into Hot + Iced ──────────────────────────
     const MENU = [
@@ -1348,6 +1505,32 @@
       await Promise.all(dels);
     }
 
+    // ── END-OF-DAY AUTO-ARCHIVE ───────────────────────────
+    // Moves all orders from today (before midnight) to orders_archive
+    // when Sid opens the admin panel after midnight. Non-destructive.
+    async function autoArchiveIfNewDay() {
+      try {
+        const snap = await getDocs(collection(db, 'orders'));
+        if (snap.empty) return;
+        const midnight = new Date(); midnight.setHours(0,0,0,0);
+        const toArchive = [];
+        snap.forEach(d => {
+          const data = d.data();
+          if (data.timestamp && new Date(data.timestamp) < midnight) toArchive.push({ id: d.id, data });
+        });
+        if (!toArchive.length) return;
+        const writes = [];
+        toArchive.forEach(({ id, data }) => {
+          writes.push(setDoc(doc(db, 'orders_archive', id), { ...data, archivedAt: new Date().toISOString() }));
+          writes.push(deleteDoc(doc(db, 'orders', id)));
+        });
+        await Promise.all(writes);
+        // Also reset counter so new day starts fresh
+        await setDoc(doc(db, 'meta', 'counter'), { count: 0 });
+        showToast(`✦ ${toArchive.length} orders from yesterday archived. Fresh start!`, 4000);
+      } catch(e) { console.error('Archive error:', e); }
+    }
+
     // ── UI HELPERS ────────────────────────────────────────────────────────────
     function showToast(msg, dur = 2800) {
       document.querySelectorAll('.toast').forEach(t => t.remove());
@@ -1385,6 +1568,7 @@
       }
       if (id === 's-admin') { applyLayout(); }
       if (id !== 's-admin' && adminUnsubscribe) { adminUnsubscribe(); adminUnsubscribe = null; }
+      if (id !== 's-admin') stopAgeTimers();
       if (id !== 's-menu') cleanupPrevOrderListeners();
     }
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
@@ -1483,6 +1667,7 @@
     // ── ADMIN DASHBOARD ───────────────────────────────────────────────────────
     async function renderAdminDashboard() {
       try {
+        await autoArchiveIfNewDay();
         cachedOrders = await getAllOrdersFromDB();
         const earnings = cachedOrders.reduce((s, o) => s + o.total, 0);
         const cSnap = await getDocs(collection(db, 'customers'));
@@ -1511,7 +1696,12 @@
               if (change.type === 'added' || change.type === 'modified') {
                 const idx = cachedOrders.findIndex(o => o.orderId === data.orderId);
                 if (idx >= 0) cachedOrders[idx] = data;
-                else cachedOrders.push(data);
+                else {
+                  cachedOrders.push(data);
+                  // New order just arrived — alert Sid
+                  soundNewOrder();
+                  haptic([30, 50, 30]);
+                }
               } else if (change.type === 'removed') {
                 cachedOrders = cachedOrders.filter(o => o.orderId !== data.orderId);
               }
@@ -1587,41 +1777,90 @@
       return rows;
     }
 
+    // ── AGE TIMER ─────────────────────────────────────────
+    let _ageTimerInterval = null;
+    function startAgeTimers() {
+      if (_ageTimerInterval) clearInterval(_ageTimerInterval);
+      _ageTimerInterval = setInterval(updateAgePills, 30000); // refresh every 30s
+    }
+    function stopAgeTimers() {
+      if (_ageTimerInterval) { clearInterval(_ageTimerInterval); _ageTimerInterval = null; }
+    }
+    function ageString(ts) {
+      const mins = Math.floor((Date.now() - new Date(ts)) / 60000);
+      if (mins < 1)  return 'just now';
+      if (mins < 60) return mins + 'm ago';
+      return Math.floor(mins / 60) + 'h ago';
+    }
+    function ageCls(ts) {
+      const mins = Math.floor((Date.now() - new Date(ts)) / 60000);
+      if (mins >= 12) return 'age-pill alert';
+      if (mins >= 6)  return 'age-pill warn';
+      return 'age-pill';
+    }
+    function updateAgePills() {
+      document.querySelectorAll('[data-ts]').forEach(el => {
+        const ts = el.dataset.ts;
+        el.textContent = ageString(ts);
+        el.className = ageCls(ts);
+      });
+    }
+
     function renderOrdersTab() {
       const allRows = buildDrinkRows();
-      const newRows = allRows.filter(r => r.status === 'placed').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-      const prepRows = allRows.filter(r => r.status === 'preparing').sort((a, b) => (a.prepSeq || 0) - (b.prepSeq || 0) || new Date(a.timestamp) - new Date(b.timestamp));
+      const newRows   = allRows.filter(r => r.status === 'placed').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      const prepRows  = allRows.filter(r => r.status === 'preparing').sort((a, b) => (a.prepSeq || 0) - (b.prepSeq || 0) || new Date(a.timestamp) - new Date(b.timestamp));
       const readyRows = allRows.filter(r => r.status === 'ready').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-      document.getElementById('q-new-count').textContent = newRows.length;
-      document.getElementById('q-prep-count').textContent = prepRows.length;
+      document.getElementById('q-new-count').textContent   = newRows.length;
+      document.getElementById('q-prep-count').textContent  = prepRows.length;
       document.getElementById('q-ready-count').textContent = readyRows.length;
 
-      renderItemQueue('q-new-list', 'q-new-empty', newRows, 'new');
-      renderItemQueue('q-prep-list', 'q-prep-empty', prepRows, 'prep');
+      renderItemQueue('q-new-list',   'q-new-empty',   newRows,   'new');
+      renderItemQueue('q-prep-list',  'q-prep-empty',  prepRows,  'prep');
       renderItemQueue('q-ready-list', 'q-ready-empty', readyRows, 'ready');
+      startAgeTimers();
     }
 
     function menuEmojiFor(name) { const m = MENU.find(x => x.name === name); return m ? m.emoji : '☕'; }
 
     function renderItemQueue(listId, emptyId, rows, type) {
-      const list = document.getElementById(listId);
+      const list  = document.getElementById(listId);
       const empty = document.getElementById(emptyId);
-      [...list.querySelectorAll('.q-card')].forEach(el => el.remove());
+      [...list.querySelectorAll('.q-card,.prep-all-row')].forEach(el => el.remove());
       if (!rows.length) { empty.style.display = 'block'; return; }
       empty.style.display = 'none';
 
+      // For the "new" queue only: inject "Prep all X" headers per drink type
+      if (type === 'new') {
+        // Group consecutive rows by drink name (sorted by timestamp, so same drinks cluster)
+        const drinkGroups = {};
+        rows.forEach(r => { (drinkGroups[r.itemName] = drinkGroups[r.itemName] || []).push(r); });
+        // Only show "prep all" header when there are 2+ of the same drink
+        Object.entries(drinkGroups).forEach(([name, groupRows]) => {
+          if (groupRows.length >= 2) {
+            const header = document.createElement('div');
+            header.className = 'prep-all-row';
+            header.innerHTML = `
+              <span style="font-size:12px;font-weight:600;color:#185FA5">${menuEmojiFor(name)} ${name} <span style="opacity:.6;font-weight:400">× ${groupRows.length}</span></span>
+              <button class="prep-all-btn" onclick="window._prepAllDrink('${name.replace(/'/g,"\\'")}')">PREP ALL →</button>`;
+            list.insertBefore(header, empty);
+          }
+        });
+      }
+
       rows.forEach(row => {
-        const d = new Date(row.timestamp);
-        const timeStr = d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+        const timeStr = new Date(row.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
         const shortId = row.orderId.replace('ORD-', '#');
-        const emoji = menuEmojiFor(row.itemName);
+        const emoji   = menuEmojiFor(row.itemName);
         const safeOId = row.orderId.replace(/'/g, "\\'");
         const safeItm = row.itemName.replace(/'/g, "\\'");
         const unitIdx = row.unitIdx;
 
         const card = document.createElement('div');
         card.className = 'q-card';
+        // Store key for flash targeting
+        card.dataset.key = `${row.orderId}:${row.itemName}:${unitIdx}`;
 
         if (type === 'new') {
           card.style.cssText = 'background:rgba(255,255,255,.85);border:1px solid rgba(55,138,221,.2);border-radius:14px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
@@ -1632,10 +1871,10 @@
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
             <span style="font-size:11px;font-weight:700;color:#185FA5;background:rgba(55,138,221,.1);padding:1px 7px;border-radius:7px">${shortId}</span>
             <span style="font-size:11px;color:#6B5E52">${row.customerName}</span>
-            <span style="font-size:10px;color:#9E8E82">${timeStr}</span>
+            <span class="${ageCls(row.timestamp)}" data-ts="${row.timestamp}">${ageString(row.timestamp)}</span>
           </div>
         </div>
-        <button onclick="window._unitToPrep('${safeOId}','${safeItm}',${unitIdx})" style="background:#185FA5;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">PREP →</button>`;
+        <button onclick="window._unitToPrep('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#185FA5;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">PREP →</button>`;
 
         } else if (type === 'prep') {
           card.style.cssText = 'background:rgba(255,255,255,.85);border:1px solid rgba(239,159,39,.3);border-radius:14px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
@@ -1646,16 +1885,16 @@
           <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap">
             <span style="font-size:11px;font-weight:700;color:#854F0B;background:rgba(239,159,39,.15);padding:1px 7px;border-radius:7px">${shortId}</span>
             <span style="font-size:11px;color:#6B5E52">${row.customerName}</span>
-            <span style="font-size:10px;color:#9E8E82">${timeStr}</span>
+            <span class="${ageCls(row.timestamp)}" data-ts="${row.timestamp}">${ageString(row.timestamp)}</span>
           </div>
         </div>
-        <button onclick="window._unitToReady('${safeOId}','${safeItm}',${unitIdx})" style="background:#C17D3C;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">READY →</button>`;
+        <button onclick="window._unitToReady('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#C17D3C;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">READY →</button>`;
 
         } else {
           const isDone = row.collected;
           card.style.cssText = `background:${isDone ? 'rgba(76,175,80,.06)' : 'rgba(255,255,255,.85)'};border:1px solid ${isDone ? 'rgba(76,175,80,.35)' : 'rgba(76,175,80,.2)'};border-radius:14px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;transition:all .2s`;
           card.innerHTML = `
-        <button onclick="window._unitToggleCollected('${safeOId}','${safeItm}',${unitIdx},${isDone})" style="width:26px;height:26px;border-radius:50%;border:2px solid #4caf50;background:${isDone ? '#4caf50' : 'none'};cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <button onclick="window._unitToggleCollected('${safeOId}','${safeItm}',${unitIdx},${isDone},this)" style="width:26px;height:26px;border-radius:50%;border:2px solid #4caf50;background:${isDone ? '#4caf50' : 'none'};cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">
           ${isDone ? '<svg width="12" height="12" viewBox="0 0 14 14" fill="none"><polyline points="2,7 5.5,10.5 12,3" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>' : ''}
         </button>
         <span style="font-size:24px;flex-shrink:0">${emoji}</span>
@@ -1681,17 +1920,25 @@
       await setDoc(doc(db, 'orders', orderId), { status: s }, { merge: true });
     }
 
-    window._unitToPrep = async (orderId, itemName, unitIdx) => {
+    window._unitToPrep = async (orderId, itemName, unitIdx, btnEl) => {
+      soundPrep(); haptic(40);
+      // Flash the card before Firestore updates re-render it
+      const card = btnEl ? btnEl.closest('.q-card') : null;
+      if (card) flashAndRemove(card, 'card-flash-prep');
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (!snap.exists()) return;
       const order = snap.data();
       const key = itemName + ':' + unitIdx;
-      const newSt = { ...(order.itemStatuses || {}), [key]: 'preparing' };
-      const newSeq = { ...(order.itemPrepSeq || {}), [key]: Date.now() };
+      const newSt  = { ...(order.itemStatuses || {}), [key]: 'preparing' };
+      const newSeq = { ...(order.itemPrepSeq  || {}), [key]: Date.now()  };
       await setDoc(doc(db, 'orders', orderId), { itemStatuses: newSt, itemPrepSeq: newSeq }, { merge: true });
       await syncOrderStatus(orderId, newSt);
     };
-    window._unitToReady = async (orderId, itemName, unitIdx) => {
+
+    window._unitToReady = async (orderId, itemName, unitIdx, btnEl) => {
+      soundReady(); haptic([30, 30, 60]);
+      const card = btnEl ? btnEl.closest('.q-card') : null;
+      if (card) flashAndRemove(card, 'card-flash-ready');
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (!snap.exists()) return;
       const order = snap.data();
@@ -1700,13 +1947,54 @@
       await setDoc(doc(db, 'orders', orderId), { itemStatuses: newSt }, { merge: true });
       await syncOrderStatus(orderId, newSt);
     };
-    window._unitToggleCollected = async (orderId, itemName, unitIdx, currentDone) => {
+
+    window._unitToggleCollected = async (orderId, itemName, unitIdx, currentDone, btnEl) => {
+      soundCollect(); haptic(25);
+      if (!currentDone) {
+        const card = btnEl ? btnEl.closest('.q-card') : null;
+        if (card) flashAndRemove(card, 'card-flash-collect', 350);
+      }
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (!snap.exists()) return;
       const order = snap.data();
       const key = itemName + ':' + unitIdx;
       const newCol = { ...(order.itemCollected || {}), [key]: !currentDone };
       await setDoc(doc(db, 'orders', orderId), { itemCollected: newCol }, { merge: true });
+    };
+
+    // ── PREP ALL: move every placed unit of a drink to preparing at once ──
+    window._prepAllDrink = async (itemName) => {
+      soundPrep(); haptic([40, 20, 40]);
+      // Flash all matching new-queue cards
+      document.querySelectorAll('#q-new-list .q-card').forEach(card => {
+        const nameEl = card.querySelector('p');
+        if (nameEl && nameEl.textContent.trim() === itemName) flashAndRemove(card, 'card-flash-prep');
+      });
+      // Find all placed units for this drink across all orders
+      const writes = [];
+      for (const order of cachedOrders) {
+        const statuses = order.itemStatuses || {};
+        const prepSeq  = order.itemPrepSeq  || {};
+        let changed = false;
+        order.items.forEach(it => {
+          if (it.name !== itemName) return;
+          for (let u = 0; u < it.qty; u++) {
+            const key = itemName + ':' + u;
+            if ((statuses[key] || 'placed') === 'placed') {
+              statuses[key] = 'preparing';
+              prepSeq[key]  = Date.now();
+              changed = true;
+            }
+          }
+        });
+        if (changed) {
+          writes.push(
+            setDoc(doc(db, 'orders', order.orderId), { itemStatuses: statuses, itemPrepSeq: prepSeq }, { merge: true })
+              .then(() => syncOrderStatus(order.orderId, statuses))
+          );
+        }
+      }
+      await Promise.all(writes);
     };
 
     function renderItemsTab() {
@@ -2004,6 +2292,23 @@ async function placeOrder() {
           }
         }
 
+// ── CUSTOMER ORDER-READY BANNER ───────────────────────────────────────────
+    let _bannerShownForOrder = null;
+    function showReadyBanner(order) {
+      if (_bannerShownForOrder === order.orderId) return; // only show once per order
+      _bannerShownForOrder = order.orderId;
+      const items = order.items || [];
+      document.getElementById('ready-banner-items').textContent =
+        items.map(it => `${menuEmojiFor(it.name)} ${it.name}${it.qty > 1 ? ' ×' + it.qty : ''}`).join('  ·  ');
+      document.getElementById('ready-banner').classList.add('show');
+      // Also vibrate the customer's phone
+      haptic([100, 80, 100, 80, 200]);
+    }
+    function dismissReadyBanner() {
+      document.getElementById('ready-banner').classList.remove('show');
+    }
+    window.dismissReadyBanner = dismissReadyBanner;
+
 // ── PAYMENT ───────────────────────────────────────────────────────────────
 function renderPayment() {
           const o = state.currentOrder;
@@ -2019,6 +2324,11 @@ function renderPayment() {
             const data = snap.data();
             state.currentOrder = { ...state.currentOrder, ...data };
             renderPayItemStatuses(state.currentOrder);
+            // Show full-screen banner when order flips to ready
+            if (data.status === 'ready' && state.currentOrder._lastStatus !== 'ready') {
+              showReadyBanner(state.currentOrder);
+            }
+            state.currentOrder._lastStatus = data.status;
           });
         }
 
@@ -2160,6 +2470,7 @@ const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
       window.downloadExcel = downloadExcel; window.sendWhatsAppReport = sendWhatsAppReport;
       window.clearAllData = clearAllData; window.payNow = payNow;
       window.saveSession = saveSession; window.clearSession = clearSession; window.resetIdleTimer = resetIdleTimer;
+      window.menuEmojiFor = menuEmojiFor;
   </script>
 </body>
 

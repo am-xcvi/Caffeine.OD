@@ -2028,7 +2028,10 @@
               <span style="font-size:12px;font-weight:600;color:#2C1810">${customerName}</span>
               <span style="font-size:11px;color:#6B5E52">${orderRows.length} item${orderRows.length > 1 ? 's' : ''}</span>
             </div>
-            ${anyUncollected ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>` : `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>`}
+            <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+              ${anyUncollected ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>` : `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>`}
+              <button onclick="window._markOrderPaid('${safeOId}',this)" style="background:#C17D3C;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">₹ Paid</button>
+            </div>
           </div>`;
 
         // Individual item rows
@@ -2087,6 +2090,41 @@
         catch(e) { console.error('_collectAllForOrder write failed', e); }
       }
     };
+    // ── Mark an entire order as paid ──────────────────────────────────────
+    window._markOrderPaid = async (orderId, btnEl) => {
+      soundCollect(); haptic([30, 20, 30]);
+      // Optimistic UI — flash and remove card
+      const group = btnEl ? btnEl.closest('.ready-order-group') : null;
+      if (group) {
+        group.style.transition = 'opacity .3s,transform .3s';
+        group.style.opacity = '0';
+        group.style.transform = 'scale(.97)';
+        setTimeout(() => { group.remove(); }, 300);
+      }
+      // Update Firestore
+      try {
+        await updateDoc(doc(db, 'orders', orderId), { status: 'paid' });
+        // Also mark all items as collected
+        const cached = cachedOrders.find(o => o.orderId === orderId);
+        if (cached) {
+          const updates = {};
+          cached.items.forEach(it => {
+            for (let u = 0; u < it.qty; u++) {
+              updates[`itemCollected.${it.name}:${u}`] = true;
+            }
+          });
+          if (Object.keys(updates).length) {
+            await updateDoc(doc(db, 'orders', orderId), updates);
+          }
+        }
+        showToast('Order ' + orderId.replace('ORD-','#') + ' marked as paid ✦');
+      } catch(e) {
+        console.error('_markOrderPaid failed', e);
+        showToast('Error marking as paid — try again');
+        if (group) { group.style.opacity = '1'; group.style.transform = 'none'; }
+      }
+    };
+
     // Kept as a stub so any stale references don't crash.
     async function syncOrderStatus(orderId, itemStatuses) {
       const vals = Object.values(itemStatuses);

@@ -979,7 +979,7 @@
             style="width:38px;height:38px;border-radius:50%;background:#d4edda;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">
             ✓</div>
           <div>
-            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:#6B5E52">Order confirmed</p>
+            <p style="font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:#6B5E52" id="pay-confirmed-label">Order confirmed</p>
             <p class="fd" style="font-weight:600;color:#2C1810;font-size:14px" id="pay-order-id">—</p>
           </div>
         </div>
@@ -1466,7 +1466,7 @@
       { name: 'Zen Pourover (Iced)', price: 200, desc: 'A live-brewed v60 pourover served iced — 3 rotating medium roast coffees in collaboration with Zen Coffee, chilled to bring out bright, refreshing notes.', tag: 'Iced · Pourover', emoji: '🧊', accent: '#5B8FA8' },
     ];
 
-    let state = { user: null, cart: {}, currentOrder: null, orderStatusUnsub: null };
+    let state = { user: null, cart: {}, currentOrder: null, orderStatusUnsub: null, sessionOrders: [] };
 
     // ── SESSION PERSISTENCE ───────────────────────────────────────────────────
     function saveSession() {
@@ -1649,7 +1649,7 @@
     function confirmReset() { openModal('modal-reset'); }
     function doReset() {
       closeModal('modal-reset');
-      state.user = null; state.cart = {}; state.currentOrder = null;
+      state.user = null; state.cart = {}; state.currentOrder = null; state.sessionOrders = [];
       if (_readyWatchUnsub) { _readyWatchUnsub(); _readyWatchUnsub = null; }
       _bannerShownForOrder = null;
       clearSession();
@@ -2504,6 +2504,7 @@ async function placeOrder() {
             await saveOrder(order, state.user.phoneNumber, state.user.name);
             state.user.orders = [...(state.user.orders || []), order];
             state.currentOrder = order;
+            state.sessionOrders = [...(state.sessionOrders || []), order]; // accumulate unpaid orders
             state.cart = {};
             watchOrderForReady(order); // global listener — fires banner on ANY screen
             showToast('Order placed! ☕');
@@ -2567,30 +2568,79 @@ async function placeOrder() {
 
 // ── PAYMENT ───────────────────────────────────────────────────────────────
 function renderPayment() {
-          const o = state.currentOrder;
-          document.getElementById('pay-order-id').textContent = o.orderId.replace('ORD-', '#');
-          document.getElementById('pay-amount').textContent = '₹' + o.total;
-          document.getElementById('pay-now-amount').textContent = '₹' + o.total;
-          document.getElementById('pay-items-count').textContent = o.items.length + ' item' + (o.items.length > 1 ? 's' : '');
-          renderPayItemStatuses(o);
+          // Collect all session orders; filter to unpaid ones for total
+          const allSession = state.sessionOrders || [];
+          const unpaid = allSession.filter(o => !['paid', 'done'].includes(o.status));
+          const grandTotal = unpaid.reduce((s, o) => s + o.total, 0);
+          const totalQty = unpaid.reduce((s, o) => o.items.reduce((a, it) => a + it.qty, 0) + s, 0);
 
-          // Keep a lightweight snapshot here for per-item pill updates on the payment screen.
-          // The ready banner itself is handled globally by watchOrderForReady() so it fires
-          // on any screen — no duplicate check needed here.
-          if (state.orderStatusUnsub) state.orderStatusUnsub();
-          state.orderStatusUnsub = onSnapshot(doc(db, 'orders', o.orderId), snap => {
-            if (!snap.exists()) return;
-            const data = snap.data();
-            state.currentOrder = { ...state.currentOrder, ...data };
-            renderPayItemStatuses(state.currentOrder);
-          });
+          // Header: show single order ID or count
+          const headerEl = document.getElementById('pay-order-id');
+          if (unpaid.length === 1) {
+            headerEl.textContent = unpaid[0].orderId.replace('ORD-', '#');
+          } else if (unpaid.length > 1) {
+            headerEl.textContent = unpaid.length + ' unpaid orders';
+          } else {
+            headerEl.textContent = 'All paid ✓';
+          }
+
+          document.getElementById('pay-amount').textContent = '₹' + grandTotal;
+          document.getElementById('pay-now-amount').textContent = '₹' + grandTotal;
+          document.getElementById('pay-items-count').textContent =
+            totalQty + ' item' + (totalQty !== 1 ? 's' : '');
+
+          // Render all session order statuses grouped
+          renderAllPayItemStatuses(allSession);
+
+          // Live Firestore listeners — one per session order
+          if (state.orderStatusUnsub) { state.orderStatusUnsub(); state.orderStatusUnsub = null; }
+          const unsubs = allSession.map(order =>
+            onSnapshot(doc(db, 'orders', order.orderId), snap => {
+              if (!snap.exists()) return;
+              const data = snap.data();
+              const i = state.sessionOrders.findIndex(o => o.orderId === order.orderId);
+              if (i >= 0) state.sessionOrders[i] = { ...state.sessionOrders[i], ...data };
+              // Re-render if payment screen is still active
+              if (document.getElementById('s-payment').classList.contains('active')) {
+                renderPayment();
+              }
+            })
+          );
+          state.orderStatusUnsub = () => unsubs.forEach(u => u());
         }
 
 // ── CHANGE 3: Per-item status visible to customer ─────────────────────────
-function renderPayItemStatuses(order) {
+function renderAllPayItemStatuses(orders) {
           const container = document.getElementById('pay-item-statuses');
           if (!container) return;
           container.innerHTML = '';
+          const showHeaders = orders.length > 1;
+
+          orders.forEach((order, orderIdx) => {
+            const isPaid = ['paid', 'done'].includes(order.status);
+
+            // Order group header (only when multiple orders)
+            if (showHeaders) {
+              const hdr = document.createElement('div');
+              hdr.style.cssText = 'display:flex;align-items:center;gap:8px;margin:' + (orderIdx > 0 ? '14px' : '2px') + ' 0 10px';
+              hdr.innerHTML = `
+                <span style="font-size:11px;font-weight:700;color:#C17D3C;background:rgba(193,125,60,.12);padding:3px 9px;border-radius:8px;letter-spacing:.06em;flex-shrink:0">${order.orderId.replace('ORD-','#')}</span>
+                <div style="flex:1;height:1px;background:#EDE3CC"></div>
+                <span style="font-size:12px;font-weight:600;color:${isPaid ? '#2e7d32' : '#2C1810'}">${isPaid ? '✓ Paid' : '₹' + order.total}</span>
+              `;
+              container.appendChild(hdr);
+            }
+
+            // Per-item rows (reuse same pill logic)
+            renderPayItemStatuses(order, container);
+          });
+        }
+
+        function renderPayItemStatuses(order, container) {
+          if (!container) container = document.getElementById('pay-item-statuses');
+          if (!container) return;
+          // only clear if called standalone (no external container passed)
+          if (container === document.getElementById('pay-item-statuses')) container.innerHTML = '';
           order.items.forEach(it => {
             const group = document.createElement('div');
             group.style.cssText = 'margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(237,227,204,.7)';
@@ -2639,11 +2689,13 @@ function renderPayItemStatuses(order) {
 
 // ── CHANGE 5: Single "Pay Now" button → opens default UPI app ────────────
 function payNow() {
-          const o = state.currentOrder;
-          if (!o) return;
-          const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${o.total}&cu=INR&tn=${encodeURIComponent(o.orderId.replace('ORD-', '#'))}`;
+          const allSession = state.sessionOrders || [];
+          const unpaid = allSession.filter(o => !['paid', 'done'].includes(o.status));
+          if (!unpaid.length) return;
+          const grandTotal = unpaid.reduce((s, o) => s + o.total, 0);
+          const orderRefs = unpaid.map(o => o.orderId.replace('ORD-', '#')).join('+');
+          const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${grandTotal}&cu=INR&tn=${encodeURIComponent(orderRefs)}`;
           window.location.href = upiUrl;
-          // Fallback: if no UPI app catches the intent, nothing breaks
         }
 
 // ── WHATSAPP & EXCEL ──────────────────────────────────────────────────────
@@ -2700,7 +2752,7 @@ const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
           if (state.user.isAdmin) {
             adminLogout();
           } else {
-            state.user = null; state.cart = {}; state.currentOrder = null;
+            state.user = null; state.cart = {}; state.currentOrder = null; state.sessionOrders = [];
             clearSession();
             cleanupPrevOrderListeners();
             if (state.orderStatusUnsub) { state.orderStatusUnsub(); state.orderStatusUnsub = null; }
@@ -2722,7 +2774,7 @@ const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
       window.togglePrev = togglePrev; window.switchTab = switchTab;
       window.toggleOCard = typeof toggleOCard !== "undefined" ? toggleOCard : function () { };
       window.downloadExcel = downloadExcel; window.sendWhatsAppReport = sendWhatsAppReport;
-      window.clearAllData = clearAllData; window.payNow = payNow;
+      window.clearAllData = clearAllData; window.payNow = payNow; window.renderAllPayItemStatuses = renderAllPayItemStatuses;
       window.saveSession = saveSession; window.clearSession = clearSession; window.resetIdleTimer = resetIdleTimer;
       window.menuEmojiFor = menuEmojiFor;
 
@@ -2730,11 +2782,12 @@ const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
       window.orderMore = function() {
         // Tear down the payment-screen item-status listener
         if (state.orderStatusUnsub) { state.orderStatusUnsub(); state.orderStatusUnsub = null; }
-        // Sync the latest currentOrder status back into state.user.orders so
-        // the prev-order list on s-menu shows up-to-date status immediately
+        // Sync the latest currentOrder status back into state.user.orders and sessionOrders
         if (state.currentOrder) {
           const idx = (state.user.orders || []).findIndex(o => o.orderId === state.currentOrder.orderId);
           if (idx >= 0) state.user.orders[idx] = { ...state.user.orders[idx], ...state.currentOrder };
+          const si = (state.sessionOrders || []).findIndex(o => o.orderId === state.currentOrder.orderId);
+          if (si >= 0) state.sessionOrders[si] = { ...state.sessionOrders[si], ...state.currentOrder };
         }
         state.cart = {};
         renderMenu();

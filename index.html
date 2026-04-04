@@ -1052,7 +1052,7 @@
           Pay Now · <span id="pay-now-amount">₹0</span>
         </button>
 
-        <button onclick="state.cart={};renderMenu();goTo('s-menu')" class="btn-outline">+ Order more</button>
+        <button onclick="orderMore()" class="btn-outline">+ Order more</button>
         <p style="text-align:center;font-size:12px;color:rgba(107,94,82,.4)">Thank you for coming ✦ Come back soon</p>
       </div>
     </div>
@@ -1530,7 +1530,11 @@
       return snap.exists() ? snap.data() : null;
     }
     async function saveCustomer(data) {
-      await setDoc(doc(db, 'customers', data.phoneNumber), data, { merge: true });
+      // Only persist identity fields — never overwrite the orders array stored by saveOrder.
+      // Using merge:true ensures the doc is created if new, updated if existing.
+      await setDoc(doc(db, 'customers', data.phoneNumber),
+        { name: data.name, phoneNumber: data.phoneNumber },
+        { merge: true });
     }
     async function getNextOrderId() {
       const ref = doc(db, 'meta', 'counter');
@@ -1628,7 +1632,10 @@
       if (id === 's-admin') { applyLayout(); }
       if (id !== 's-admin' && adminUnsubscribe) { adminUnsubscribe(); adminUnsubscribe = null; }
       if (id !== 's-admin') stopAgeTimers();
-      if (id !== 's-menu') cleanupPrevOrderListeners();
+      // Only tear down prev-order listeners when leaving the order flow entirely.
+      // s-menu and s-payment are both part of the same session flow — keep listeners alive
+      // across them so status updates are instant when the customer returns to s-menu.
+      if (id === 's-landing' || id === 's-admin') cleanupPrevOrderListeners();
     }
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
@@ -1750,10 +1757,8 @@
         switchTab(currentTab);
 
         if (!adminUnsubscribe) {
-          // Use snapshot data directly — no extra getDocs call on every change
-          // This means 50 concurrent users = 50 writes but only 1 read per change on Sid's device
+          // ── Live orders listener ────────────────────────────────────────────
           adminUnsubscribe = onSnapshot(collection(db, 'orders'), (snapshot) => {
-            // Incrementally update cachedOrders from the snapshot changes
             snapshot.docChanges().forEach(change => {
               const data = { ...change.doc.data() };
               if (change.type === 'added' || change.type === 'modified') {
@@ -1761,7 +1766,6 @@
                 if (idx >= 0) cachedOrders[idx] = data;
                 else {
                   cachedOrders.push(data);
-                  // New order just arrived — alert Sid
                   soundNewOrder();
                   haptic([30, 50, 30]);
                 }
@@ -1778,6 +1782,13 @@
             const s2 = document.getElementById('adm-stat-earnings-side'); if (s2) s2.textContent = '₹' + earn;
             if (currentTab === 'orders') debouncedRenderOrders();
             if (currentTab === 'items') renderItemsTab();
+          });
+
+          // ── Live customers listener — keeps guest count accurate in real time ─
+          onSnapshot(collection(db, 'customers'), (snap) => {
+            const count = snap.docs.filter(d => d.id !== ADMIN_PHONE).length;
+            document.getElementById('adm-stat-custs').textContent = count;
+            const s3 = document.getElementById('adm-stat-custs-side'); if (s3) s3.textContent = count;
           });
         }
       } catch (e) { console.error(e); showToast('Error loading dashboard'); }
@@ -2328,6 +2339,12 @@
         }
 
 function renderPrevOrders() {
+          // Sync the latest live currentOrder data into the user's orders array
+          // so the initial render is never stale — onSnapshot will keep it live after that.
+          if (state.currentOrder) {
+            const idx = (state.user.orders || []).findIndex(o => o.orderId === state.currentOrder.orderId);
+            if (idx >= 0) state.user.orders[idx] = { ...state.user.orders[idx], ...state.currentOrder };
+          }
           cleanupPrevOrderListeners();
           const list = document.getElementById('prev-orders-list');
           list.innerHTML = '';
@@ -2374,6 +2391,9 @@ function renderPrevOrders() {
               if (!snap.exists()) return;
               const data = snap.data();
               const newStatus = data.status || 'placed';
+              // Keep state.user.orders in sync so any future re-render starts fresh
+              const oidx = (state.user.orders || []).findIndex(o => o.orderId === order.orderId);
+              if (oidx >= 0) state.user.orders[oidx] = { ...state.user.orders[oidx], ...data };
               // Update status badge
               const badge = document.getElementById('prev-status-' + order.orderId);
               if (badge) {
@@ -2510,6 +2530,9 @@ async function placeOrder() {
         const data = snap.data();
         const merged = { ...order, ...data };
         state.currentOrder = { ...state.currentOrder, ...data };
+        // Keep state.user.orders in sync
+        const oidx = (state.user && state.user.orders || []).findIndex(o => o.orderId === order.orderId);
+        if (oidx >= 0) state.user.orders[oidx] = { ...state.user.orders[oidx], ...data };
         if (data.status === 'ready' && _bannerShownForOrder !== order.orderId) {
           showReadyBanner(merged);
         }
@@ -2702,6 +2725,21 @@ const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
       window.clearAllData = clearAllData; window.payNow = payNow;
       window.saveSession = saveSession; window.clearSession = clearSession; window.resetIdleTimer = resetIdleTimer;
       window.menuEmojiFor = menuEmojiFor;
+
+      // ── Order More: unsubscribe payment listener, clear cart, re-render fresh menu ──
+      window.orderMore = function() {
+        // Tear down the payment-screen item-status listener
+        if (state.orderStatusUnsub) { state.orderStatusUnsub(); state.orderStatusUnsub = null; }
+        // Sync the latest currentOrder status back into state.user.orders so
+        // the prev-order list on s-menu shows up-to-date status immediately
+        if (state.currentOrder) {
+          const idx = (state.user.orders || []).findIndex(o => o.orderId === state.currentOrder.orderId);
+          if (idx >= 0) state.user.orders[idx] = { ...state.user.orders[idx], ...state.currentOrder };
+        }
+        state.cart = {};
+        renderMenu();
+        goTo('s-menu');
+      };
   </script>
 </body>
 

@@ -772,7 +772,7 @@
     <!-- ══════════ SCREEN 1: LANDING ══════════ -->
     <div class="screen active" id="s-landing" style="padding:40px 24px 36px;gap:24px">
       <div class="land-anim d1" style="text-align:center">
-        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 4.2
+        <p style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#6B5E52">Home Pop-Up · Version 4.3
         </p>
       </div>
       <div class="land-anim d2" style="display:flex;flex-direction:column;align-items:center;gap:16px">
@@ -1396,10 +1396,19 @@
     }
 
     // ── CARD FLASH + REMOVE ───────────────────────────────
-    // Flashes a card with colour, then removes it after animation
-    function flashAndRemove(cardEl, flashClass, delay = 450) {
+    // Registers the move as pending so snapshot re-renders are held off,
+    // flashes the card with colour, then removes it and clears pending.
+    function flashAndRemove(cardEl, flashClass, moveKey, delay = 450) {
+      if (moveKey) _pendingMoves.add(moveKey);
       cardEl.classList.add(flashClass);
-      setTimeout(() => cardEl.remove(), delay);
+      setTimeout(() => {
+        cardEl.remove();
+        if (moveKey) {
+          _pendingMoves.delete(moveKey);
+          // Now that the animation is done, trigger a clean re-render
+          debouncedRenderOrders();
+        }
+      }, delay);
     }
 
     // ── CHANGE 1: Zen Pourover split into Hot + Iced ──────────────────────────
@@ -1430,12 +1439,22 @@
     let adminUnsubscribe = null;
     let prevOrderUnsubs = [];
     let cachedOrders = [];
+    // Keys of units currently mid-flash-animation — snapshot re-renders are suppressed
+    // for these until the animation completes, preventing the "vanish then reappear" glitch.
+    const _pendingMoves = new Set();
     // Debounce: prevents re-rendering the order list on every single Firestore event
     // when 50 users place orders simultaneously — batches updates into one render per 300ms
     let _renderOrdersTimer = null;
     function debouncedRenderOrders() {
       clearTimeout(_renderOrdersTimer);
-      _renderOrdersTimer = setTimeout(() => renderOrdersTab(), 300);
+      _renderOrdersTimer = setTimeout(() => {
+        // If cards are still mid-flash, wait until they finish before re-rendering
+        if (_pendingMoves.size > 0) {
+          debouncedRenderOrders(); // retry in another 300ms
+          return;
+        }
+        renderOrdersTab();
+      }, 300);
     }
     let currentTab = 'orders';
 
@@ -1640,6 +1659,8 @@
       if (phone === ADMIN_PHONE) {
         state.user = { name: 'Siddharth', phoneNumber: phone, isAdmin: true };
         btn.disabled = false; btn.textContent = 'Continue →';
+        saveSession();
+        resetIdleTimer();
         await renderAdminDashboard();
         goTo('s-admin');
         return;
@@ -1922,9 +1943,9 @@
 
     window._unitToPrep = async (orderId, itemName, unitIdx, btnEl) => {
       soundPrep(); haptic(40);
-      // Flash the card before Firestore updates re-render it
+      const moveKey = `${orderId}:${itemName}:${unitIdx}`;
       const card = btnEl ? btnEl.closest('.q-card') : null;
-      if (card) flashAndRemove(card, 'card-flash-prep');
+      if (card) flashAndRemove(card, 'card-flash-prep', moveKey);
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (!snap.exists()) return;
       const order = snap.data();
@@ -1937,8 +1958,9 @@
 
     window._unitToReady = async (orderId, itemName, unitIdx, btnEl) => {
       soundReady(); haptic([30, 30, 60]);
+      const moveKey = `${orderId}:${itemName}:${unitIdx}`;
       const card = btnEl ? btnEl.closest('.q-card') : null;
-      if (card) flashAndRemove(card, 'card-flash-ready');
+      if (card) flashAndRemove(card, 'card-flash-ready', moveKey);
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (!snap.exists()) return;
       const order = snap.data();
@@ -1950,10 +1972,9 @@
 
     window._unitToggleCollected = async (orderId, itemName, unitIdx, currentDone, btnEl) => {
       soundCollect(); haptic(25);
-      if (!currentDone) {
-        const card = btnEl ? btnEl.closest('.q-card') : null;
-        if (card) flashAndRemove(card, 'card-flash-collect', 350);
-      }
+      const moveKey = `${orderId}:${itemName}:${unitIdx}:collect`;
+      const card = btnEl ? btnEl.closest('.q-card') : null;
+      if (!currentDone && card) flashAndRemove(card, 'card-flash-collect', moveKey, 350);
       const snap = await getDoc(doc(db, 'orders', orderId));
       if (!snap.exists()) return;
       const order = snap.data();
@@ -1965,12 +1986,14 @@
     // ── PREP ALL: move every placed unit of a drink to preparing at once ──
     window._prepAllDrink = async (itemName) => {
       soundPrep(); haptic([40, 20, 40]);
-      // Flash all matching new-queue cards
+      // Flash and remove all matching new-queue cards, registering each as pending
       document.querySelectorAll('#q-new-list .q-card').forEach(card => {
         const nameEl = card.querySelector('p');
-        if (nameEl && nameEl.textContent.trim() === itemName) flashAndRemove(card, 'card-flash-prep');
+        if (nameEl && nameEl.textContent.trim() === itemName) {
+          const moveKey = card.dataset.key;
+          flashAndRemove(card, 'card-flash-prep', moveKey);
+        }
       });
-      // Find all placed units for this drink across all orders
       const writes = [];
       for (const order of cachedOrders) {
         const statuses = order.itemStatuses || {};

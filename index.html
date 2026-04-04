@@ -1848,7 +1848,9 @@
             rows.push({
               orderId: order.orderId, customerName: order.customerName,
               itemName: it.name, unitIdx: u, timestamp: order.timestamp,
-              status, prepSeq, readySeq, collected, key
+              status, prepSeq, readySeq, collected, key,
+              orderStatus: order.status || 'placed',
+              orderTotal: order.total || 0
             });
           }
         });
@@ -2018,19 +2020,28 @@
         // Order group wrapper
         const group = document.createElement('div');
         group.className = 'ready-order-group';
-        group.style.cssText = `background:${allDone ? 'rgba(76,175,80,.04)' : 'rgba(255,255,255,.9)'};border:1.5px solid ${allDone ? 'rgba(76,175,80,.3)' : 'rgba(76,175,80,.35)'};border-radius:16px;margin-bottom:10px;overflow:hidden;transition:all .2s`;
+        const isPaidGroup = (orderRows[0].orderStatus === 'paid' || orderRows[0].orderStatus === 'done');
+        group.style.cssText = `background:${isPaidGroup ? 'rgba(193,125,60,.04)' : allDone ? 'rgba(76,175,80,.04)' : 'rgba(255,255,255,.9)'};border:1.5px solid ${isPaidGroup ? 'rgba(193,125,60,.3)' : allDone ? 'rgba(76,175,80,.3)' : 'rgba(76,175,80,.35)'};border-radius:16px;margin-bottom:10px;overflow:hidden;transition:all .2s`;
 
-        // Group header with customer name + Collect All button
+        // Group header with customer name + total + paid badge
+        const orderStatus = orderRows[0].orderStatus || 'ready';
+        const orderTotal  = orderRows[0].orderTotal  || 0;
+        const isPaidOrder = orderStatus === 'paid' || orderStatus === 'done';
         const headerHtml = `
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:${allDone ? 'rgba(76,175,80,.08)' : 'rgba(76,175,80,.06)'};border-bottom:1px solid rgba(76,175,80,.15)">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:11px;font-weight:700;color:#2e7d32;background:rgba(76,175,80,.15);padding:2px 8px;border-radius:7px">${shortId}</span>
-              <span style="font-size:12px;font-weight:600;color:#2C1810">${customerName}</span>
-              <span style="font-size:11px;color:#6B5E52">${orderRows.length} item${orderRows.length > 1 ? 's' : ''}</span>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:${isPaidOrder ? 'rgba(193,125,60,.06)' : allDone ? 'rgba(76,175,80,.08)' : 'rgba(76,175,80,.06)'};border-bottom:1px solid ${isPaidOrder ? 'rgba(193,125,60,.2)' : 'rgba(76,175,80,.15)'}">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
+              <span style="font-size:11px;font-weight:700;color:#2e7d32;background:rgba(76,175,80,.15);padding:2px 8px;border-radius:7px;flex-shrink:0">${shortId}</span>
+              <span style="font-size:12px;font-weight:600;color:#2C1810;flex-shrink:0">${customerName}</span>
+              <span style="font-size:11px;color:#6B5E52;flex-shrink:0">${orderRows.length} item${orderRows.length > 1 ? 's' : ''}</span>
+              <span style="font-size:12px;font-weight:700;color:#C17D3C;flex-shrink:0">₹${orderTotal}</span>
+              ${isPaidOrder ? '<span style="font-size:10px;font-weight:700;color:#fff;background:#C17D3C;padding:2px 8px;border-radius:7px;flex-shrink:0;letter-spacing:.04em">✦ PAID</span>' : ''}
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-              ${anyUncollected ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>` : `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>`}
-              <button onclick="window._markOrderPaid('${safeOId}',this)" style="background:#C17D3C;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">₹ Paid</button>
+              ${!isPaidOrder && anyUncollected ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>` : (!isPaidOrder ? `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>` : '')}
+              ${isPaidOrder
+                ? `<span style="font-size:10px;font-weight:700;color:#C17D3C;background:rgba(193,125,60,.12);padding:5px 10px;border-radius:8px;border:1px solid rgba(193,125,60,.25);white-space:nowrap">✦ Paid</span>`
+                : `<button onclick="window._markOrderPaid('${safeOId}',this)" style="background:#C17D3C;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">₹ Paid</button>`
+              }
             </div>
           </div>`;
 
@@ -2093,35 +2104,45 @@
     // ── Mark an entire order as paid ──────────────────────────────────────
     window._markOrderPaid = async (orderId, btnEl) => {
       soundCollect(); haptic([30, 20, 30]);
-      // Optimistic UI — flash and remove card
-      const group = btnEl ? btnEl.closest('.ready-order-group') : null;
-      if (group) {
-        group.style.transition = 'opacity .3s,transform .3s';
-        group.style.opacity = '0';
-        group.style.transform = 'scale(.97)';
-        setTimeout(() => { group.remove(); }, 300);
+
+      // ── Optimistic local update — mark in cachedOrders and re-render in place ──
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      if (cached) {
+        cached.status = 'paid';
+        // Also mark all ready items as collected
+        cached.items.forEach(it => {
+          for (let u = 0; u < it.qty; u++) {
+            const key = it.name + ':' + u;
+            if ((cached.itemStatuses && cached.itemStatuses[key]) === 'ready') {
+              cached.itemCollected = cached.itemCollected || {};
+              cached.itemCollected[key] = true;
+            }
+          }
+        });
       }
-      // Update Firestore
+      debouncedRenderOrders(); // re-render queue — card stays, now shows PAID badge
+
+      // ── Persist to Firestore ──────────────────────────────────────────────────
       try {
-        await updateDoc(doc(db, 'orders', orderId), { status: 'paid' });
-        // Also mark all items as collected
-        const cached = cachedOrders.find(o => o.orderId === orderId);
+        const fsUpdates = { status: 'paid' };
         if (cached) {
-          const updates = {};
           cached.items.forEach(it => {
             for (let u = 0; u < it.qty; u++) {
-              updates[`itemCollected.${it.name}:${u}`] = true;
+              const key = it.name + ':' + u;
+              if ((cached.itemStatuses && cached.itemStatuses[key]) === 'ready') {
+                fsUpdates[`itemCollected.${key}`] = true;
+              }
             }
           });
-          if (Object.keys(updates).length) {
-            await updateDoc(doc(db, 'orders', orderId), updates);
-          }
         }
+        await updateDoc(doc(db, 'orders', orderId), fsUpdates);
         showToast('Order ' + orderId.replace('ORD-','#') + ' marked as paid ✦');
       } catch(e) {
         console.error('_markOrderPaid failed', e);
         showToast('Error marking as paid — try again');
-        if (group) { group.style.opacity = '1'; group.style.transform = 'none'; }
+        // Revert optimistic update
+        if (cached) cached.status = 'ready';
+        debouncedRenderOrders();
       }
     };
 

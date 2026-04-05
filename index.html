@@ -2936,16 +2936,12 @@ function isIOS() {
         function payNow() {
           const { unpaid, grandTotal, orderRefs } = getUnpaidTotal();
           if (!unpaid.length) return;
-          // Build the UPI URL correctly:
-          // pa (payee address / UPI ID) must be RAW — encoding breaks VPA validation
-          // pn and tn are free-text, encode those
           const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${grandTotal}&cu=INR&tn=${encodeURIComponent(orderRefs)}`;
-          window.location.href = upiUrl;
+          window.open(upiUrl, '_blank');
         }
         function payNowIOS(app) {
           const { unpaid, grandTotal, orderRefs } = getUnpaidTotal();
           if (!unpaid.length) return;
-          // pa must be raw (unencoded) — encoding the @ to %40 breaks VPA lookup
           const pa = UPI_ID;
           const pn = encodeURIComponent('Caffeine OD');
           const tn = encodeURIComponent(orderRefs);
@@ -2957,7 +2953,7 @@ function isIOS() {
             cred:    `credpay://upi/pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             upi:     `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
           };
-          window.location.href = schemes[app] || schemes.upi;
+          window.open(schemes[app] || schemes.upi, '_blank');
         }
 
 // ── WHATSAPP & EXCEL ──────────────────────────────────────────────────────

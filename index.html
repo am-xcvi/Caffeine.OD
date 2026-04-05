@@ -2000,10 +2000,10 @@
             <span class="${ageCls(row.timestamp)}" data-ts="${row.timestamp}">${ageString(row.timestamp)}</span>
           </div>
         </div>
-        <button        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center">
-          onclick="window._unitToPrep('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#185FA5;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">PREP →</button>`;
+        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center">
+          <button onclick="window._unitToPrep('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#185FA5;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">PREP →</button>
           <button onclick="window._cancelOrder('${safeOId}')" class="btn-cancel-order" title="Cancel order">✕</button>
-        </div>
+        </div>`;
 
         } else if (type === 'prep') {
           card.style.cssText = 'background:rgba(255,255,255,.85);border:1px solid rgba(239,159,39,.3);border-radius:14px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
@@ -2017,10 +2017,10 @@
             <span class="${ageCls(row.timestamp)}" data-ts="${row.timestamp}">${ageString(row.timestamp)}</span>
           </div>
         </div>
-        <button        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center">
-          onclick="window._unitToReady('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#C17D3C;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">READY →</button>`;
+        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center">
+          <button onclick="window._unitToReady('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#C17D3C;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">READY →</button>
           <button onclick="window._cancelOrder('${safeOId}')" class="btn-cancel-order" title="Cancel order">✕</button>
-        </div>
+        </div>`;
 
         } else {
           const isDone = row.collected;

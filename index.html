@@ -763,6 +763,26 @@
       animation: slideUp .4s cubic-bezier(.22,1,.36,1);
       box-shadow: 0 24px 60px rgba(44,24,16,.35);
     }
+
+    /* ── Cancel order button ── */
+    .btn-cancel-order {
+      background: none;
+      border: 1.5px solid rgba(192,57,43,.35);
+      color: #c0392b;
+      border-radius: 8px;
+      padding: 5px 9px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: .03em;
+      white-space: nowrap;
+      transition: all .15s;
+      flex-shrink: 0;
+    }
+    .btn-cancel-order:hover { background: rgba(192,57,43,.08); border-color: rgba(192,57,43,.6); }
+    .btn-cancel-order:active { transform: scale(.95); }
+    .status-cancelled { background: rgba(192,57,43,.1); color: #c0392b; border: 1px solid rgba(192,57,43,.25); }
   </style>
 </head>
 
@@ -1914,9 +1934,9 @@
 
     function renderOrdersTab() {
       const allRows = buildDrinkRows();
-      const newRows   = allRows.filter(r => r.status === 'placed').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-      const prepRows  = allRows.filter(r => r.status === 'preparing').sort((a, b) => (a.prepSeq || 0) - (b.prepSeq || 0) || new Date(a.timestamp) - new Date(b.timestamp));
-      const readyRows = allRows.filter(r => r.status === 'ready').sort((a, b) => (b.readySeq || 0) - (a.readySeq || 0) || new Date(b.timestamp) - new Date(a.timestamp));
+      const newRows   = allRows.filter(r => r.status === 'placed'    && r.orderStatus !== 'cancelled').sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      const prepRows  = allRows.filter(r => r.status === 'preparing' && r.orderStatus !== 'cancelled').sort((a, b) => (a.prepSeq || 0) - (b.prepSeq || 0) || new Date(a.timestamp) - new Date(b.timestamp));
+      const readyRows = allRows.filter(r => r.status === 'ready'     && r.orderStatus !== 'cancelled').sort((a, b) => (b.readySeq || 0) - (a.readySeq || 0) || new Date(b.timestamp) - new Date(a.timestamp));
 
       document.getElementById('q-new-count').textContent   = newRows.length;
       document.getElementById('q-prep-count').textContent  = prepRows.length;
@@ -1980,7 +2000,10 @@
             <span class="${ageCls(row.timestamp)}" data-ts="${row.timestamp}">${ageString(row.timestamp)}</span>
           </div>
         </div>
-        <button onclick="window._unitToPrep('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#185FA5;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">PREP →</button>`;
+        <button        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center">
+          onclick="window._unitToPrep('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#185FA5;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">PREP →</button>`;
+          <button onclick="window._cancelOrder('${safeOId}')" class="btn-cancel-order" title="Cancel order">✕</button>
+        </div>
 
         } else if (type === 'prep') {
           card.style.cssText = 'background:rgba(255,255,255,.85);border:1px solid rgba(239,159,39,.3);border-radius:14px;padding:10px 12px;margin-bottom:8px;display:flex;align-items:center;gap:10px';
@@ -1994,7 +2017,10 @@
             <span class="${ageCls(row.timestamp)}" data-ts="${row.timestamp}">${ageString(row.timestamp)}</span>
           </div>
         </div>
-        <button onclick="window._unitToReady('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#C17D3C;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">READY →</button>`;
+        <button        <div style="display:flex;gap:5px;flex-shrink:0;align-items:center">
+          onclick="window._unitToReady('${safeOId}','${safeItm}',${unitIdx},this)" style="background:#C17D3C;color:#fff;border:none;border-radius:9px;padding:7px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;letter-spacing:.03em">READY →</button>`;
+          <button onclick="window._cancelOrder('${safeOId}')" class="btn-cancel-order" title="Cancel order">✕</button>
+        </div>
 
         } else {
           const isDone = row.collected;
@@ -2074,6 +2100,10 @@
               ${isPaidOrder
                 ? `<span style="font-size:10px;font-weight:700;color:#C17D3C;background:rgba(193,125,60,.12);padding:5px 10px;border-radius:8px;border:1px solid rgba(193,125,60,.3);white-space:nowrap;letter-spacing:.03em">✦ Paid</span>`
                 : `<button onclick="window._markOrderPaid('${safeOId}',this)" style="background:#C17D3C;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">₹ Paid</button>`
+              }
+              ${!isPaidOrder
+                ? `<button onclick="window._cancelOrder('${safeOId}')" class="btn-cancel-order" title="Cancel order">✕ Cancel</button>`
+                : ''
               }
             </div>
           </div>`;
@@ -2379,6 +2409,7 @@
         ready: { cls: 'status-ready', txt: '✓ Ready!' },
         paid: { cls: 'status-paid', txt: '✦ Paid' },
         done: { cls: 'status-paid', txt: '✦ Done' },
+        cancelled: { cls: 'status-cancelled', txt: '✕ Cancelled' },
       };
       return map[status] || map['placed'];
     }
@@ -2834,6 +2865,15 @@ function renderAllPayItemStatuses(orders) {
         function renderPayItemStatuses(order, container) {
           if (!container) container = document.getElementById('pay-item-statuses');
           if (!container) return;
+          // Show cancelled state prominently
+          if (order.status === 'cancelled') {
+            if (container === document.getElementById('pay-item-statuses')) container.innerHTML = '';
+            const msg = document.createElement('div');
+            msg.style.cssText = 'display:flex;align-items:center;gap:10px;padding:12px 4px';
+            msg.innerHTML = '<span style="font-size:22px">✕</span><div><p style="font-size:14px;font-weight:600;color:#c0392b">Order Cancelled</p><p style="font-size:12px;color:#6B5E52;margin-top:2px">Please speak to Siddharth for a refund.</p></div>';
+            container.appendChild(msg);
+            return;
+          }
           // only clear if called standalone (no external container passed)
           if (container === document.getElementById('pay-item-statuses')) container.innerHTML = '';
           order.items.forEach(it => {
@@ -2896,21 +2936,24 @@ function isIOS() {
         function payNow() {
           const { unpaid, grandTotal, orderRefs } = getUnpaidTotal();
           if (!unpaid.length) return;
-          // Android: upi:// triggers the native system app-chooser
-          // (never called on iOS — renderPayment() hides this button on iOS)
-          window.location.href = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${grandTotal}&cu=INR&tn=${encodeURIComponent(orderRefs)}`;
+          // Build the UPI URL correctly:
+          // pa (payee address / UPI ID) must be RAW — encoding breaks VPA validation
+          // pn and tn are free-text, encode those
+          const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${grandTotal}&cu=INR&tn=${encodeURIComponent(orderRefs)}`;
+          window.location.href = upiUrl;
         }
         function payNowIOS(app) {
           const { unpaid, grandTotal, orderRefs } = getUnpaidTotal();
           if (!unpaid.length) return;
-          const pa = encodeURIComponent(UPI_ID);
+          // pa must be raw (unencoded) — encoding the @ to %40 breaks VPA lookup
+          const pa = UPI_ID;
           const pn = encodeURIComponent('Caffeine OD');
           const tn = encodeURIComponent(orderRefs);
           const am = grandTotal;
           const schemes = {
             phonepe: `phonepe://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             gpay:    `tez://upi/pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
-            paytm:   `paytmmp://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR`,
+            paytm:   `paytmmp://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             cred:    `credpay://upi/pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             upi:     `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
           };
@@ -2987,7 +3030,41 @@ const IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutes
       });
 
       // ── EXPOSE ────────────────────────────────────────────────────────────────
-      window.goHome = goHome; window.goTo = goTo; window.openModal = openModal; window.closeModal = closeModal;
+      
+    // ── CANCEL ORDER ─────────────────────────────────────────────────────────
+    window._cancelOrder = async (orderId) => {
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      if (!cached) return;
+      if (cached.status === 'cancelled') return; // already cancelled
+
+      const shortId  = orderId.replace('ORD-', '#');
+      const custName = cached.customerName || 'this customer';
+      const itemList = (cached.items || []).map(it => `${it.name} ×${it.qty}`).join(', ');
+
+      // Confirmation modal
+      const confirmed = confirm(
+        `Cancel order ${shortId} for ${custName}?\n\nItems: ${itemList}\nTotal: ₹${cached.total}\n\nThis cannot be undone.`
+      );
+      if (!confirmed) return;
+
+      // Optimistic update — remove from queues immediately
+      cached.status = 'cancelled';
+      debouncedRenderOrders();
+      showToast('Order ' + shortId + ' cancelled');
+
+      // Persist to Firestore
+      try {
+        await updateDoc(doc(db, 'orders', orderId), { status: 'cancelled' });
+      } catch(e) {
+        console.error('_cancelOrder failed', e);
+        // Revert
+        cached.status = 'placed';
+        debouncedRenderOrders();
+        showToast('Error cancelling — try again');
+      }
+    };
+
+    window.goHome = goHome; window.goTo = goTo; window.openModal = openModal; window.closeModal = closeModal;
       window.confirmReset = confirmReset; window.doReset = doReset; window.adminLogout = adminLogout;
       window.placeOrder = placeOrder; window.goToOrder = goToOrder; window.addC = addC; window.remC = remC;
       window.togglePrev = togglePrev; window.switchTab = switchTab;

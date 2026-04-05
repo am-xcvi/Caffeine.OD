@@ -1042,8 +1042,7 @@
           </div>
         </div>
 
-        <!-- PAY NOW — Android: single UPI chooser | iOS: named app buttons -->
-        <!-- Android sees this single button (upi:// opens native chooser) -->
+        <!-- PAY NOW — Android: native upi:// chooser | iOS: named app buttons -->
         <button class="btn-pay-now" id="btn-pay-android" onclick="payNow()" style="display:none">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
             <rect x="2" y="5" width="20" height="14" rx="3" stroke="#F5EFE0" stroke-width="2"/>
@@ -1052,7 +1051,6 @@
           </svg>
           Pay Now · <span id="pay-now-amount">₹0</span>
         </button>
-        <!-- iOS sees named-app buttons because upi:// has no native iOS handler -->
         <div id="ios-pay-btns" style="display:none;flex-direction:column;gap:10px">
           <p style="font-size:11px;text-transform:uppercase;letter-spacing:.18em;color:#6B5E52;text-align:center">Pay <span id="pay-now-amount-ios">₹0</span> via</p>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
@@ -1068,9 +1066,13 @@
               <svg width="18" height="18" viewBox="0 0 40 40"><circle cx="20" cy="20" r="20" fill="#fff"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="10" font-weight="bold" fill="#00BAF2">Pay</text></svg>
               Paytm
             </button>
-            <button onclick="payNowIOS('upi')" style="background:#F5EFE0;color:#2C1810;border:1.5px solid #EDE3CC;border-radius:16px;padding:14px 10px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.02em">
-              <svg width="18" height="18" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="19" stroke="#2C1810" stroke-width="2"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="9" font-weight="bold" fill="#2C1810">UPI</text></svg>
-              Other
+            <button onclick="payNowIOS('cred')" style="background:#1C1C1E;color:#FFD700;border:none;border-radius:16px;padding:14px 10px;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.02em">
+              <svg width="18" height="18" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="20" fill="#2C2C2E"/><text x="50%" y="56%" dominant-baseline="middle" text-anchor="middle" font-size="11" font-weight="bold" fill="#FFD700">C</text></svg>
+              CRED
+            </button>
+            <button onclick="payNowIOS('upi')" style="grid-column:span 2;background:#F5EFE0;color:#2C1810;border:1.5px solid #EDE3CC;border-radius:16px;padding:13px 10px;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.02em">
+              <svg width="16" height="16" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="19" stroke="#2C1810" stroke-width="2"/><text x="50%" y="55%" dominant-baseline="middle" text-anchor="middle" font-size="9" font-weight="bold" fill="#2C1810">UPI</text></svg>
+              Other UPI App
             </button>
           </div>
         </div>
@@ -1871,7 +1873,9 @@
             rows.push({
               orderId: order.orderId, customerName: order.customerName,
               itemName: it.name, unitIdx: u, timestamp: order.timestamp,
-              status, prepSeq, readySeq, collected, key
+              status, prepSeq, readySeq, collected, key,
+              orderStatus: order.status || 'placed',
+              orderTotal: order.total || 0
             });
           }
         });
@@ -2039,21 +2043,38 @@
         const unitsList = orderRows.map(r => `${r.itemName.replace(/'/g,"\\'")}:${r.unitIdx}`).join(',');
 
         // Order group wrapper
+        const isPaidOrder = orderRows[0].orderStatus === 'paid' || orderRows[0].orderStatus === 'done';
+        const orderTotal  = orderRows[0].orderTotal || 0;
         const group = document.createElement('div');
         group.className = 'ready-order-group';
-        group.style.cssText = `background:${allDone ? 'rgba(76,175,80,.04)' : 'rgba(255,255,255,.9)'};border:1.5px solid ${allDone ? 'rgba(76,175,80,.3)' : 'rgba(76,175,80,.35)'};border-radius:16px;margin-bottom:10px;overflow:hidden;transition:all .2s`;
+        group.dataset.orderId = orderId;
+        group.style.cssText = isPaidOrder
+          ? 'background:rgba(193,125,60,.05);border:1.5px solid rgba(193,125,60,.35);border-radius:16px;margin-bottom:10px;overflow:hidden;transition:all .2s'
+          : `background:${allDone ? 'rgba(76,175,80,.04)' : 'rgba(255,255,255,.9)'};border:1.5px solid ${allDone ? 'rgba(76,175,80,.3)' : 'rgba(76,175,80,.35)'};border-radius:16px;margin-bottom:10px;overflow:hidden;transition:all .2s`;
 
-        // Group header with customer name + Collect All button
+        // Group header — amber when paid, green when ready
+        const hdrBg      = isPaidOrder ? 'rgba(193,125,60,.08)' : (allDone ? 'rgba(76,175,80,.08)' : 'rgba(76,175,80,.06)');
+        const hdrBorder  = isPaidOrder ? 'rgba(193,125,60,.2)'  : 'rgba(76,175,80,.15)';
+        const idColor    = isPaidOrder ? '#C17D3C'              : '#2e7d32';
+        const idBg       = isPaidOrder ? 'rgba(193,125,60,.15)' : 'rgba(76,175,80,.15)';
         const headerHtml = `
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:${allDone ? 'rgba(76,175,80,.08)' : 'rgba(76,175,80,.06)'};border-bottom:1px solid rgba(76,175,80,.15)">
-            <div style="display:flex;align-items:center;gap:8px">
-              <span style="font-size:11px;font-weight:700;color:#2e7d32;background:rgba(76,175,80,.15);padding:2px 8px;border-radius:7px">${shortId}</span>
-              <span style="font-size:12px;font-weight:600;color:#2C1810">${customerName}</span>
-              <span style="font-size:11px;color:#6B5E52">${orderRows.length} item${orderRows.length > 1 ? 's' : ''}</span>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:9px 12px;background:${hdrBg};border-bottom:1px solid ${hdrBorder}">
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0">
+              <span style="font-size:11px;font-weight:700;color:${idColor};background:${idBg};padding:2px 8px;border-radius:7px;flex-shrink:0">${shortId}</span>
+              <span style="font-size:12px;font-weight:600;color:#2C1810;flex-shrink:0">${customerName}</span>
+              <span style="font-size:11px;color:#6B5E52;flex-shrink:0">${orderRows.length} item${orderRows.length > 1 ? 's' : ''}</span>
+              <span style="font-size:12px;font-weight:700;color:#C17D3C;flex-shrink:0">₹${orderTotal}</span>
+              ${isPaidOrder ? '<span style="font-size:10px;font-weight:700;color:#fff;background:#C17D3C;padding:2px 9px;border-radius:7px;letter-spacing:.05em;flex-shrink:0">✦ PAID</span>' : ''}
             </div>
             <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
-              ${anyUncollected ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>` : `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>`}
-              <button onclick="window._markOrderPaid('${safeOId}',this)" style="background:#C17D3C;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">₹ Paid</button>
+              ${!isPaidOrder && anyUncollected
+                ? `<button onclick="window._collectAllForOrder('${safeOId}',this)" style="background:#2e7d32;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">✓ Collect All</button>`
+                : (!isPaidOrder ? `<span style="font-size:10px;font-weight:700;color:#4caf50">All Collected ✓</span>` : '')
+              }
+              ${isPaidOrder
+                ? `<span style="font-size:10px;font-weight:700;color:#C17D3C;background:rgba(193,125,60,.12);padding:5px 10px;border-radius:8px;border:1px solid rgba(193,125,60,.3);white-space:nowrap;letter-spacing:.03em">✦ Paid</span>`
+                : `<button onclick="window._markOrderPaid('${safeOId}',this)" style="background:#C17D3C;color:#fff;border:none;border-radius:8px;padding:5px 10px;font-family:'DM Sans',sans-serif;font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.03em;white-space:nowrap">₹ Paid</button>`
+              }
             </div>
           </div>`;
 
@@ -2116,35 +2137,44 @@
     // ── Mark an entire order as paid ──────────────────────────────────────
     window._markOrderPaid = async (orderId, btnEl) => {
       soundCollect(); haptic([30, 20, 30]);
-      // Optimistic UI — flash and remove card
-      const group = btnEl ? btnEl.closest('.ready-order-group') : null;
-      if (group) {
-        group.style.transition = 'opacity .3s,transform .3s';
-        group.style.opacity = '0';
-        group.style.transform = 'scale(.97)';
-        setTimeout(() => { group.remove(); }, 300);
-      }
-      // Update Firestore
-      try {
-        await updateDoc(doc(db, 'orders', orderId), { status: 'paid' });
-        // Also mark all items as collected
-        const cached = cachedOrders.find(o => o.orderId === orderId);
-        if (cached) {
-          const updates = {};
-          cached.items.forEach(it => {
-            for (let u = 0; u < it.qty; u++) {
-              updates[`itemCollected.${it.name}:${u}`] = true;
-            }
-          });
-          if (Object.keys(updates).length) {
-            await updateDoc(doc(db, 'orders', orderId), updates);
+
+      // Guard: already paid — do nothing
+      const cached = cachedOrders.find(o => o.orderId === orderId);
+      if (!cached || cached.status === 'paid' || cached.status === 'done') return;
+
+      // ── Optimistic local update — mutate cachedOrders, re-render in place ──
+      cached.status = 'paid';
+      // Mark all ready items as collected locally too
+      cached.items.forEach(it => {
+        for (let u = 0; u < it.qty; u++) {
+          const key = it.name + ':' + u;
+          if ((cached.itemStatuses?.[key]) === 'ready') {
+            cached.itemCollected = cached.itemCollected || {};
+            cached.itemCollected[key] = true;
           }
         }
+      });
+      debouncedRenderOrders(); // re-render: card stays, turns amber, button → badge
+
+      // ── Persist to Firestore ──────────────────────────────────────────────
+      try {
+        const fsUpdates = { status: 'paid' };
+        cached.items.forEach(it => {
+          for (let u = 0; u < it.qty; u++) {
+            const key = it.name + ':' + u;
+            if ((cached.itemStatuses?.[key]) === 'ready') {
+              fsUpdates[`itemCollected.${key}`] = true;
+            }
+          }
+        });
+        await updateDoc(doc(db, 'orders', orderId), fsUpdates);
         showToast('Order ' + orderId.replace('ORD-','#') + ' marked as paid ✦');
       } catch(e) {
         console.error('_markOrderPaid failed', e);
+        // Revert optimistic update
+        if (cached) cached.status = 'ready';
+        debouncedRenderOrders();
         showToast('Error marking as paid — try again');
-        if (group) { group.style.opacity = '1'; group.style.transform = 'none'; }
       }
     };
 
@@ -2646,10 +2676,11 @@ function renderPayment() {
           }
 
           document.getElementById('pay-amount').textContent = '₹' + grandTotal;
-          document.getElementById('pay-now-amount') && (document.getElementById('pay-now-amount').textContent = '\u20b9' + grandTotal);
-          document.getElementById('pay-now-amount-ios') && (document.getElementById('pay-now-amount-ios').textContent = '\u20b9' + grandTotal);
-          // Show the right button set for this platform
-          const _iOS = isIOS();
+          // Sync amount on both button variants
+          document.getElementById('pay-now-amount')     && (document.getElementById('pay-now-amount').textContent     = '₹' + grandTotal);
+          document.getElementById('pay-now-amount-ios') && (document.getElementById('pay-now-amount-ios').textContent = '₹' + grandTotal);
+          // Show the right payment UI per platform
+          const _iOS    = isIOS();
           const _andBtn = document.getElementById('btn-pay-android');
           const _iosDiv = document.getElementById('ios-pay-btns');
           if (_andBtn) _andBtn.style.display = _iOS ? 'none' : 'flex';
@@ -2759,37 +2790,32 @@ function renderAllPayItemStatuses(orders) {
 function isIOS() {
           return /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
         }
-
         function getUnpaidTotal() {
           const allSession = state.sessionOrders || [];
-          const unpaid = allSession.filter(o => !['paid', 'done'].includes(o.status));
-          const grandTotal = unpaid.reduce((s, o) => s + o.total, 0);
-          const orderRefs = unpaid.map(o => o.orderId.replace('ORD-', '#')).join('+');
+          const unpaid = allSession.filter(o => !['paid','done'].includes(o.status));
+          const grandTotal = unpaid.reduce((s,o) => s+o.total, 0);
+          const orderRefs  = unpaid.map(o => o.orderId.replace('ORD-','#')).join('+');
           return { unpaid, grandTotal, orderRefs };
         }
-
         function payNow() {
           const { unpaid, grandTotal, orderRefs } = getUnpaidTotal();
           if (!unpaid.length) return;
-          // Android: upi:// triggers native app chooser (PhonePe, GPay, Cred, etc.)
-          // iOS: upi:// has no native handler — WhatsApp Pay hijacks it, so we never call it on iOS
-          const upiUrl = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${grandTotal}&cu=INR&tn=${encodeURIComponent(orderRefs)}`;
-          window.location.href = upiUrl;
+          // Android: upi:// triggers the native system app-chooser
+          // (never called on iOS — renderPayment() hides this button on iOS)
+          window.location.href = `upi://pay?pa=${UPI_ID}&pn=${encodeURIComponent('Caffeine OD')}&am=${grandTotal}&cu=INR&tn=${encodeURIComponent(orderRefs)}`;
         }
-
-        // iOS-only: open the specific UPI app by its own registered URL scheme
         function payNowIOS(app) {
           const { unpaid, grandTotal, orderRefs } = getUnpaidTotal();
           if (!unpaid.length) return;
-          const pa  = encodeURIComponent(UPI_ID);
-          const pn  = encodeURIComponent('Caffeine OD');
-          const tn  = encodeURIComponent(orderRefs);
-          const am  = grandTotal;
-          // Each app has its own URL scheme on iOS — these bypass the upi:// ambiguity
+          const pa = encodeURIComponent(UPI_ID);
+          const pn = encodeURIComponent('Caffeine OD');
+          const tn = encodeURIComponent(orderRefs);
+          const am = grandTotal;
           const schemes = {
             phonepe: `phonepe://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             gpay:    `tez://upi/pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             paytm:   `paytmmp://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR`,
+            cred:    `credpay://upi/pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
             upi:     `upi://pay?pa=${pa}&pn=${pn}&am=${am}&cu=INR&tn=${tn}`,
           };
           window.location.href = schemes[app] || schemes.upi;

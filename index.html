@@ -989,8 +989,8 @@
             style="font-weight:400;color:#C17D3C">pay up</em> 🔫</p>
 
         <!-- Amount card -->
-        <div
-          style="background:#2C1810;border-radius:22px;padding:22px 20px;text-align:center;position:relative;overflow:hidden">
+        <div id="pay-amount-card"
+          style="background:#2C1810;border-radius:22px;padding:22px 20px;text-align:center;position:relative;overflow:hidden;transition:background .5s ease">
           <div
             style="position:absolute;top:-20px;right:-20px;width:90px;height:90px;border-radius:50%;background:rgba(193,125,60,.15);pointer-events:none">
           </div>
@@ -2702,54 +2702,106 @@ async function placeOrder() {
     window.dismissReadyBanner = dismissReadyBanner;
 
 // ── PAYMENT ───────────────────────────────────────────────────────────────
+// renderPayment: sets up listeners ONCE. Never calls itself recursively.
+// _updatePaymentUI: lightweight DOM update called by the snapshot callbacks.
 function renderPayment() {
-          // Collect all session orders; filter to unpaid ones for total
-          const allSession = state.sessionOrders || [];
-          const unpaid = allSession.filter(o => !['paid', 'done'].includes(o.status));
-          const grandTotal = unpaid.reduce((s, o) => s + o.total, 0);
-          const totalQty = unpaid.reduce((s, o) => o.items.reduce((a, it) => a + it.qty, 0) + s, 0);
-
-          // Header: show single order ID or count
-          const headerEl = document.getElementById('pay-order-id');
-          if (unpaid.length === 1) {
-            headerEl.textContent = unpaid[0].orderId.replace('ORD-', '#');
-          } else if (unpaid.length > 1) {
-            headerEl.textContent = unpaid.length + ' unpaid orders';
-          } else {
-            headerEl.textContent = 'All paid ✓';
-          }
-
-          document.getElementById('pay-amount').textContent = '₹' + grandTotal;
-          // Sync amount on both button variants
-          document.getElementById('pay-now-amount')     && (document.getElementById('pay-now-amount').textContent     = '₹' + grandTotal);
-          document.getElementById('pay-now-amount-ios') && (document.getElementById('pay-now-amount-ios').textContent = '₹' + grandTotal);
-          // Show the right payment UI per platform
-          const _iOS    = isIOS();
-          const _andBtn = document.getElementById('btn-pay-android');
-          const _iosDiv = document.getElementById('ios-pay-btns');
-          if (_andBtn) _andBtn.style.display = _iOS ? 'none' : 'flex';
-          if (_iosDiv) _iosDiv.style.display  = _iOS ? 'flex' : 'none';
-          document.getElementById('pay-items-count').textContent =
-            totalQty + ' item' + (totalQty !== 1 ? 's' : '') + (grandTotal > 0 ? ' · ₹' + grandTotal : '');
-
-          // Render all session order statuses grouped
-          renderAllPayItemStatuses(allSession);
-
-          // Live Firestore listeners — one per session order
+          // Tear down any previous listeners first
           if (state.orderStatusUnsub) { state.orderStatusUnsub(); state.orderStatusUnsub = null; }
+
+          _updatePaymentUI();
+
+          // Live Firestore listeners — one per session order, set up ONCE here
+          const allSession = state.sessionOrders || [];
           const unsubs = allSession.map(order =>
             onSnapshot(doc(db, 'orders', order.orderId), snap => {
               if (!snap.exists()) return;
               const data = snap.data();
+              // Update the in-memory session order
               const i = state.sessionOrders.findIndex(o => o.orderId === order.orderId);
               if (i >= 0) state.sessionOrders[i] = { ...state.sessionOrders[i], ...data };
-              // Re-render if payment screen is still active
+              // Lightweight DOM update — no listener teardown/rebuild
               if (document.getElementById('s-payment').classList.contains('active')) {
-                renderPayment();
+                _updatePaymentUI();
               }
             })
           );
           state.orderStatusUnsub = () => unsubs.forEach(u => u());
+        }
+
+function _updatePaymentUI() {
+          const allSession = state.sessionOrders || [];
+          const unpaid = allSession.filter(o => !['paid', 'done'].includes(o.status));
+          const grandTotal = unpaid.reduce((s, o) => s + o.total, 0);
+          const totalQty   = unpaid.reduce((s, o) => o.items.reduce((a, it) => a + it.qty, 0) + s, 0);
+          const allPaid    = allSession.length > 0 && unpaid.length === 0;
+
+          // ── Amount card: swap to "All Paid" state when everything is settled ──
+          const amountCard = document.getElementById('pay-amount-card');
+          const amountEl   = document.getElementById('pay-amount');
+          const countEl    = document.getElementById('pay-items-count');
+
+          if (allPaid) {
+            // Transform the card into a warm "all paid" confirmation
+            if (amountCard) {
+              amountCard.style.background = 'linear-gradient(135deg,#1a4a1a,#2e7d32)';
+            }
+            if (amountEl) {
+              amountEl.style.fontSize = '42px';
+              amountEl.textContent = '✦ All Paid';
+            }
+            if (countEl) countEl.textContent = 'Thank you! See you next time ☕';
+          } else {
+            // Normal unpaid state
+            if (amountCard) amountCard.style.background = '#2C1810';
+            if (amountEl) {
+              amountEl.style.fontSize = '';
+              amountEl.textContent = '₹' + grandTotal;
+            }
+            if (countEl) {
+              countEl.textContent = totalQty + ' item' + (totalQty !== 1 ? 's' : '') + (grandTotal > 0 ? ' · ₹' + grandTotal : '');
+            }
+          }
+
+          // Sync Pay Now button amounts
+          const pna = document.getElementById('pay-now-amount');
+          const pni = document.getElementById('pay-now-amount-ios');
+          if (pna) pna.textContent = grandTotal > 0 ? '₹' + grandTotal : '';
+          if (pni) pni.textContent = grandTotal > 0 ? '₹' + grandTotal : '';
+
+          // Show/hide payment buttons — hide when all paid
+          const androidBtn = document.getElementById('btn-pay-android');
+          const iosBtns    = document.getElementById('ios-pay-btns');
+          if (allPaid) {
+            if (androidBtn) androidBtn.style.display = 'none';
+            if (iosBtns)    iosBtns.style.display    = 'none';
+          } else {
+            const _iOS = isIOS();
+            if (androidBtn) androidBtn.style.display = _iOS ? 'none' : 'flex';
+            if (iosBtns)    iosBtns.style.display    = _iOS ? 'flex'  : 'none';
+          }
+
+          // Header label
+          const headerEl    = document.getElementById('pay-order-id');
+          const confirmedEl = document.getElementById('pay-confirmed-label');
+          if (allPaid) {
+            if (confirmedEl) confirmedEl.textContent = 'All orders paid';
+            if (headerEl)    headerEl.textContent    = '✦ Done';
+          } else {
+            if (confirmedEl) confirmedEl.textContent = 'Order confirmed';
+            if (headerEl) {
+              if (unpaid.length === 1)      headerEl.textContent = unpaid[0].orderId.replace('ORD-', '#');
+              else if (unpaid.length > 1)   headerEl.textContent = unpaid.length + ' unpaid orders';
+              else                          headerEl.textContent = '—';
+            }
+          }
+
+          // Platform-specific pay button display
+          const _iOS = isIOS();
+          if (androidBtn && !allPaid) androidBtn.style.display = _iOS ? 'none' : 'flex';
+          if (iosBtns    && !allPaid) iosBtns.style.display    = _iOS ? 'flex'  : 'none';
+
+          // Re-render item status pills
+          renderAllPayItemStatuses(allSession);
         }
 
 // ── CHANGE 3: Per-item status visible to customer ─────────────────────────

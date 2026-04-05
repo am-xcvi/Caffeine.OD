@@ -2469,9 +2469,13 @@ function renderPrevOrders() {
         <div id="prev-item-statuses-${order.orderId}">
           ${renderPrevItemStatusesHtml(order)}
         </div>
-        <div style="border-top:1px solid #EDE3CC;margin-top:8px;padding-top:8px;display:flex;justify-content:space-between">
-          <span style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#6B5E52">Order Total</span>
-          <span style="font-size:14px;font-weight:700;color:#C17D3C">₹${order.total}</span>
+        <div style="border-top:1px solid #EDE3CC;margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <span style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#6B5E52">Order Total</span>
+            <span style="font-size:14px;font-weight:700;color:#C17D3C;margin-left:8px">₹${order.total}</span>
+          </div>
+          <span id="prev-paid-badge-${order.orderId}" style="font-size:11px;font-weight:700;color:#4caf50;background:rgba(76,175,80,.1);padding:4px 12px;border-radius:20px;border:1px solid rgba(76,175,80,.25);display:${['paid','done'].includes(order.status||'placed')?'inline-flex':'none'}">✦ Paid</span>
+          <button id="prev-pay-btn-${order.orderId}" onclick="event.stopPropagation();window._payForOrder('${order.orderId}')" style="background:#2C1810;color:#F5EFE0;border:none;border-radius:12px;padding:7px 16px;font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;cursor:pointer;align-items:center;gap:6px;letter-spacing:.02em;display:${['paid','done'].includes(order.status||'placed')?'none':'flex'}">Pay ₹${order.total} →</button>
         </div>
       </div>`;
             list.appendChild(wrap);
@@ -2496,6 +2500,16 @@ function renderPrevOrders() {
               // Update item status pills
               const itemsEl = document.getElementById('prev-item-statuses-' + order.orderId);
               if (itemsEl) itemsEl.innerHTML = renderPrevItemStatusesHtml({ ...order, ...data });
+              // Update the Pay button dynamically
+              const payBtn = document.getElementById('prev-pay-btn-' + order.orderId);
+              const paidBadge = document.getElementById('prev-paid-badge-' + order.orderId);
+              if (['paid','done'].includes(newStatus)) {
+                if (payBtn)   { payBtn.style.display = 'none'; }
+                if (paidBadge){ paidBadge.style.display = 'inline-flex'; }
+              } else {
+                if (payBtn)   { payBtn.style.display = 'flex'; }
+                if (paidBadge){ paidBadge.style.display = 'none'; }
+              }
               // Toast when order flips to ready
               if (newStatus === 'ready' && _prevLastStatus !== 'ready') {
                 showToast('Your order ' + order.orderId.replace('ORD-', '#') + ' is ready! ✓');
@@ -2506,6 +2520,36 @@ function renderPrevOrders() {
           });
           // startPrevOrderPolling() is now a no-op — onSnapshot handles everything above
         }
+// Navigate to payment screen for a specific past order
+    window._payForOrder = async (orderId) => {
+      // Get the order from user's history
+      const order = (state.user.orders || []).find(o => o.orderId === orderId);
+      if (!order) return;
+
+      // Fetch latest status from Firestore to be sure it's not already paid
+      try {
+        const snap = await getDoc(doc(db, 'orders', orderId));
+        if (snap.exists()) {
+          const latest = snap.data();
+          if (['paid','done'].includes(latest.status)) {
+            showToast('This order is already paid ✦');
+            return;
+          }
+        }
+      } catch(e) { /* proceed with cached data */ }
+
+      // Add to sessionOrders if not already there
+      const alreadyInSession = (state.sessionOrders || []).some(o => o.orderId === orderId);
+      if (!alreadyInSession) {
+        state.sessionOrders = [...(state.sessionOrders || []), order];
+      }
+      state.currentOrder = order;
+
+      // Go to payment screen
+      renderPayment();
+      goTo('s-payment');
+    };
+
 function togglePrev(el) {
           const pd = el.parentElement.querySelector('.pd');
           const ch = el.querySelector('.chev');
@@ -2686,7 +2730,7 @@ function renderPayment() {
           if (_andBtn) _andBtn.style.display = _iOS ? 'none' : 'flex';
           if (_iosDiv) _iosDiv.style.display  = _iOS ? 'flex' : 'none';
           document.getElementById('pay-items-count').textContent =
-            totalQty + ' item' + (totalQty !== 1 ? 's' : '');
+            totalQty + ' item' + (totalQty !== 1 ? 's' : '') + (grandTotal > 0 ? ' · ₹' + grandTotal : '');
 
           // Render all session order statuses grouped
           renderAllPayItemStatuses(allSession);

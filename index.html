@@ -1152,7 +1152,7 @@
       <!-- Main content area (phone: full width, tablet: right panel) -->
       <div class="admin-main" style="flex:1;overflow-y:auto">
         <!-- Phone-only header -->
-        <div id="admin-phone-header" style="background:#2C1810;padding:24px 22px 20px;margin:-24px -28px 20px">
+        <div id="admin-phone-header" style="background:#2C1810;padding:24px 22px 20px;margin:-24px -18px 20px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
             <span class="admin-badge">⚡ Admin</span>
             <button onclick="adminLogout()"
@@ -1948,7 +1948,13 @@
       startAgeTimers();
     }
 
-    function menuEmojiFor(name) { const m = MENU.find(x => x.name === name); return m ? m.emoji : '☕'; }
+    // Legacy name aliases — maps old v4.3 item names to their v4.4 equivalents
+    const LEGACY_NAME_MAP = {
+      'Zen Pourover':       'Zen Pourover (Hot)',
+      'Breakfast in Luru':  "Breakfast in 'Luru",
+    };
+    function canonicalName(name) { return LEGACY_NAME_MAP[name] || name; }
+    function menuEmojiFor(name) { const m = MENU.find(x => x.name === canonicalName(name)); return m ? m.emoji : '☕'; }
 
     function renderItemQueue(listId, emptyId, rows, type) {
       const list  = document.getElementById(listId);
@@ -2358,7 +2364,7 @@
     function renderItemsTab() {
       const ic = {};
       MENU.forEach(m => { ic[m.name] = { qty: 0, revenue: 0, accent: m.accent, emoji: m.emoji }; });
-      cachedOrders.forEach(o => o.items.forEach(it => { if (ic[it.name]) { ic[it.name].qty += it.qty; ic[it.name].revenue += it.price * it.qty; } }));
+      cachedOrders.forEach(o => o.items.forEach(it => { const cn = canonicalName(it.name); if (ic[cn]) { ic[cn].qty += it.qty; ic[cn].revenue += it.price * it.qty; } }));
       const totalRev = Object.values(ic).reduce((s, v) => s + v.revenue, 0);
       const totalQty = Object.values(ic).reduce((s, v) => s + v.qty, 0);
       document.getElementById('items-breakdown').innerHTML = `
@@ -2961,7 +2967,7 @@ function waOpen(msg) { window.open('https://wa.me/' + WHATSAPP_NUMBER + '?text='
 function sendWhatsAppReport() {
           if (!cachedOrders.length) { showToast('No orders yet.'); return; }
           const earnings = cachedOrders.reduce((s, o) => s + o.total, 0);
-          const ic = {}; MENU.forEach(m => { ic[m.name] = 0; }); cachedOrders.forEach(o => o.items.forEach(it => { ic[it.name] = (ic[it.name] || 0) + it.qty; }));
+          const ic = {}; MENU.forEach(m => { ic[m.name] = 0; }); cachedOrders.forEach(o => o.items.forEach(it => { const cn = canonicalName(it.name); if (ic[cn] !== undefined) ic[cn] += it.qty; }));
           const today = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
           waOpen(`📊 *Day Report — ${today}*\n_Caffeine.OD by Siddharth Mohanty_\n\n☕ Total Orders: *${cachedOrders.length}*\n💰 Total Earnings: *₹${earnings}*\n\n*Cups Sold:*\n${MENU.map(m => `  • ${m.name}: ${ic[m.name] || 0} cups`).join('\n')}\n\n_End of day report ✦_`);
         }
@@ -2978,7 +2984,7 @@ function downloadExcel() {
           const ws1 = XLSX.utils.aoa_to_sheet(rows);
           ws1['!cols'] = [{ wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 24 }, { wch: 5 }, { wch: 16 }, { wch: 14 }, { wch: 16 }, { wch: 22 }];
           XLSX.utils.book_append_sheet(wb, ws1, 'Orders');
-          const ic = {}; MENU.forEach(m => { ic[m.name] = { qty: 0, revenue: 0 }; }); cachedOrders.forEach(o => o.items.forEach(it => { if (ic[it.name]) { ic[it.name].qty += it.qty; ic[it.name].revenue += it.price * it.qty; } }));
+          const ic = {}; MENU.forEach(m => { ic[m.name] = { qty: 0, revenue: 0 }; }); cachedOrders.forEach(o => o.items.forEach(it => { const cn = canonicalName(it.name); if (ic[cn]) { ic[cn].qty += it.qty; ic[cn].revenue += it.price * it.qty; } }));
           const ws2 = XLSX.utils.aoa_to_sheet([
             ['Item', 'Cups Sold', 'Unit Price (₹)', 'Total Revenue (₹)'],
             ...MENU.map(m => [m.name, ic[m.name].qty, m.price, ic[m.name].revenue]),
